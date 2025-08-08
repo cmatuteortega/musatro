@@ -78,8 +78,35 @@ function love.mousemoved(x, y)
     -- Transform mouse coordinates to canvas space
     mouse_x, mouse_y = canvas.transform_mouse_position(x, y)
     
-    -- Check for shop item hover tooltips
-    check_shop_hover()
+    -- Check if we should start dragging an amarraco
+    local state = game_state.get()
+    
+    -- Don't start dragging during card selection
+    if state.in_card_selection then
+        return
+    end
+    
+    local clicked_amarraco = ui.get_clicked_amarraco_state()
+    if clicked_amarraco.active and clicked_amarraco.start_time and not state.dragging_amarraco then
+        local mouse_moved = math.abs(mouse_x - clicked_amarraco.x) > 10 or math.abs(mouse_y - clicked_amarraco.y) > 10
+        
+        -- Start dragging if mouse moved enough and we're in a selling context
+        if mouse_moved and (state.in_shop or (state.hand and #state.hand > 0)) then
+            state.dragging_amarraco = clicked_amarraco.amarraco
+            state.amarraco_drag_offset_x = 0
+            state.amarraco_drag_offset_y = 0
+            -- Hide tooltip since we're now dragging
+            ui.hide_tooltip()
+            -- Clear click state since we're now in drag mode
+            clicked_amarraco.active = false
+            clicked_amarraco.start_time = nil
+        end
+    end
+    
+    -- Check for shop item hover tooltips (not during card selection)
+    if not state.in_card_selection then
+        check_shop_hover()
+    end
 end
 
 function check_shop_hover()
@@ -199,8 +226,8 @@ function check_card_hover()
     -- No card or sticker hovered, hide tooltip appropriately
     local tooltip_state = ui.get_tooltip_state()
     if tooltip_state and (tooltip_state.tooltip_type == "card" or tooltip_state.tooltip_type == "amarraco") then
-        -- Only hide if it's not a persistent tooltip (like scoring instructions)
-        if tooltip_state.timer and tooltip_state.timer < 4.0 then  -- Sticker tooltips have 3s timer, scoring has 5s
+        -- Only hide if it's not a persistent tooltip
+        if not tooltip_state.persistent and tooltip_state.timer and tooltip_state.timer < 4.0 then  -- Only hide non-persistent tooltips
             ui.hide_tooltip()
         end
     end
@@ -311,6 +338,9 @@ function love.draw()
     
     -- Draw dragging sticker on top of all other elements (but below tooltip)
     ui.draw_dragging_sticker(state)
+    
+    -- Draw dragging amarraco on top of all other elements (but below tooltip)
+    ui.draw_dragging_amarraco(state)
     
     -- Draw MUS animation on top of everything (but below tooltip)
     ui.draw_mus_animation()
@@ -443,7 +473,7 @@ function love.mousepressed(x, y, button)
                 end
             end
             
-            -- If no item was clicked, check for button clicks
+            -- If no item was clicked, check for button clicks and amarraco tooltips
             if not item_clicked then
                 local button_action = ui.check_button_click(canvas_x, canvas_y, state)
                 if button_action == "shop_reroll" then
@@ -451,6 +481,14 @@ function love.mousepressed(x, y, button)
                 elseif button_action == "shop_purchase" then
                     game_state.purchase_shop_item()
                 else
+                    -- Check if clicking on owned amarraco for tooltip (before resetting selection)
+                    if ui.handle_amarraco_mouse_press(canvas_x, canvas_y, state) then
+                        return  -- Amarraco was clicked, don't reset selection
+                    end
+                    -- Check if clicking on a sticker to start dragging (in shop)
+                    if ui.handle_sticker_mouse_press(canvas_x, canvas_y, state) then
+                        return  -- Sticker was clicked, don't reset selection
+                    end
                     -- Reset selection when clicking on background or non-interactive areas
                     state.selected_shop_item = 0
                 end
@@ -460,12 +498,12 @@ function love.mousepressed(x, y, button)
             return
         end
         
-        -- Check if clicking on an amarraco sprite for dynamic scaling and tooltip (combat only)
+        -- Check if clicking on an amarraco sprite for dynamic scaling and tooltip (combat and shop)
         if ui.handle_amarraco_mouse_press(canvas_x, canvas_y, state) then
             return
         end
         
-        -- Check if clicking on a sticker to start dragging (during combat only)
+        -- Check if clicking on a sticker to start dragging (during combat)
         if ui.handle_sticker_mouse_press(canvas_x, canvas_y, state) then
             return
         end
@@ -480,8 +518,8 @@ function love.mousepressed(x, y, button)
             end
         end
         
-        -- Hide tooltip on any other click
-        ui.hide_tooltip()
+        -- Hide tooltip on any other click (force clear for persistent tooltips)
+        ui.clear_tooltip()
         
         -- Handle card selection clicking (all types now use click-to-select)
         if state.in_card_selection then
@@ -539,8 +577,8 @@ function love.mousereleased(x, y, button)
             return
         end
         
-        -- Handle amarraco mouse release (stop scaling and hide tooltip)
-        ui.handle_amarraco_mouse_release()
+        -- Handle amarraco mouse release (drag drop and tooltip)
+        ui.handle_amarraco_mouse_release(canvas_x, canvas_y, state)
     end
 end
 
