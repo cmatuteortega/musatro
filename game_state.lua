@@ -70,6 +70,11 @@ local state = {
     drag_offset_x = 0,     -- Mouse offset from sticker center
     drag_offset_y = 0,     -- Mouse offset from sticker center
     sticker_registry = {}, -- Persistent sticker attachments by card identity
+    
+    -- Amarraco drag-and-drop selling system
+    dragging_amarraco = nil,  -- Currently dragged amarraco data
+    amarraco_drag_offset_x = 0,  -- Mouse offset from amarraco center
+    amarraco_drag_offset_y = 0,  -- Mouse offset from amarraco center
     permanently_removed_cards = {}, -- Cards permanently removed from base deck
     
     -- Animation state
@@ -108,6 +113,9 @@ function game_state.init()
     state.dragging_sticker = nil
     state.drag_offset_x = 0
     state.drag_offset_y = 0
+    state.dragging_amarraco = nil
+    state.amarraco_drag_offset_x = 0
+    state.amarraco_drag_offset_y = 0
     state.upgrades = {}
     
     -- Initialize player with fresh base deck (excluding permanently removed cards)
@@ -168,6 +176,9 @@ function game_state.init()
     state.dragging_sticker = nil
     state.drag_offset_x = 0
     state.drag_offset_y = 0
+    state.dragging_amarraco = nil
+    state.amarraco_drag_offset_x = 0
+    state.amarraco_drag_offset_y = 0
     card.clear_selections(state.hand)
     combat.reset()
     menu.hide()

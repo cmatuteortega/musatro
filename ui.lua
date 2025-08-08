@@ -132,10 +132,25 @@ function ui.hide_tooltip()
     tooltip.card = nil
     tooltip.tooltip_type = nil
     tooltip.timer = 0
+    tooltip.persistent = false
+end
+
+-- Force clear tooltip regardless of persistent state
+function ui.clear_tooltip()
+    tooltip.active = false
+    tooltip.amarraco = nil
+    tooltip.card = nil
+    tooltip.tooltip_type = nil
+    tooltip.timer = 0
+    tooltip.persistent = false
 end
 
 function ui.get_tooltip_state()
     return tooltip
+end
+
+function ui.get_clicked_amarraco_state()
+    return clicked_amarraco
 end
 
 -- Clear sprite bounds and hide tooltips (call when exiting shop)
@@ -860,7 +875,12 @@ function ui.draw_amarracos(state)
         for i, amarraco in ipairs(state.owned_amarracos) do
             local x = start_x + (i - 1) * (final_sprite_size + sprite_spacing)
             
-            -- Check if this amarraco is being clicked
+            -- Skip drawing if this amarraco is currently being dragged
+            if state.dragging_amarraco and state.dragging_amarraco.id == amarraco.id then
+                -- Still set sprite bounds for consistency, but don't draw
+                amarraco._sprite_bounds = {x = x, y = sprite_y, width = final_sprite_size, height = final_sprite_size}
+            else
+                -- Check if this amarraco is being clicked
             local is_clicked = clicked_amarraco.active and clicked_amarraco.index == i
             local current_scale = is_clicked and 5 or display_scale  -- 5x when clicked, 5x normally (integer scaling for pixel-perfect rendering)
             local current_size = base_sprite_size * current_scale
@@ -904,11 +924,10 @@ function ui.draw_amarracos(state)
                 love.graphics.setColor(1, 1, 1)
                 love.graphics.print(string.sub(amarraco.id, 1, 1), draw_x + 2, draw_y + 2)
             end
+            end
             
             -- Store sprite bounds for click detection (always use original size for hit detection)
             amarraco._sprite_bounds = {x = x, y = sprite_y, width = final_sprite_size, height = final_sprite_size}
-            
-            -- Effect subtitles removed - players can use tooltips to check amarraco effects
         end
     end
 end
@@ -917,26 +936,33 @@ end
 function ui.handle_amarraco_mouse_press(x, y, state)
     if not state then return false end
     
-    -- Check owned amarracos in game view (only when not in shop)
-    if not state.in_shop and state.owned_amarracos and #state.owned_amarracos > 0 then
+    -- Don't handle amarraco interactions during card selection
+    if state.in_card_selection then
+        return false
+    end
+    
+    -- Check owned amarracos in game view and shop
+    if state.owned_amarracos and #state.owned_amarracos > 0 then
         for i, amarraco in ipairs(state.owned_amarracos) do
             if amarraco._sprite_bounds then
                 local bounds = amarraco._sprite_bounds
                 if x >= bounds.x and x <= bounds.x + bounds.width and
                    y >= bounds.y and y <= bounds.y + bounds.height then
-                    -- Start clicking this amarraco
+                    -- Start click/drag interaction
                     clicked_amarraco.active = true
                     clicked_amarraco.index = i
+                    clicked_amarraco.amarraco = amarraco
                     clicked_amarraco.x = x
                     clicked_amarraco.y = y
+                    clicked_amarraco.start_time = love.timer.getTime()  -- Track click start time
                     
-                    -- Show tooltip immediately when clicking
+                    -- Show tooltip immediately for brief feedback
                     tooltip.active = true
                     tooltip.amarraco = amarraco
                     tooltip.tooltip_type = "amarraco"
                     tooltip.x = x
                     tooltip.y = y
-                    tooltip.timer = 999  -- Keep tooltip visible while clicking
+                    tooltip.timer = 3.0  -- Standard tooltip timer
                     
                     return true  -- Consumed the click
                 end
@@ -997,18 +1023,119 @@ function ui.handle_amarraco_mouse_press(x, y, state)
     return false  -- Click not on any amarraco or shop item
 end
 
+
 -- Handle mouse release 
-function ui.handle_amarraco_mouse_release()
-    if clicked_amarraco.active then
-        -- Stop clicking and hide tooltip
+function ui.handle_amarraco_mouse_release(x, y, state)
+    -- Don't handle amarraco interactions during card selection
+    if state.in_card_selection then
+        return false
+    end
+    
+    -- Handle amarraco drag drop first
+    if state and state.dragging_amarraco then
+        local result = ui.handle_amarraco_drag_drop(x, y, state)
+        -- Clear click state after drag is finished
         clicked_amarraco.active = false
         clicked_amarraco.index = nil
-        tooltip.active = false
-        tooltip.amarraco = nil
-        tooltip.tooltip_type = nil
+        clicked_amarraco.amarraco = nil
+        clicked_amarraco.start_time = nil
+        return result
+    end
+    
+    -- Handle amarraco click/drag decision
+    if clicked_amarraco.active and clicked_amarraco.start_time then
+        local click_duration = love.timer.getTime() - clicked_amarraco.start_time
+        local mouse_moved = math.abs(x - clicked_amarraco.x) > 10 or math.abs(y - clicked_amarraco.y) > 10
+        
+        -- Determine if this was a brief click or drag attempt
+        if click_duration < 0.3 and not mouse_moved then
+            -- Brief click - keep tooltip visible and add persistent timer
+            tooltip.active = true
+            tooltip.amarraco = clicked_amarraco.amarraco
+            tooltip.tooltip_type = "amarraco"
+            tooltip.x = x
+            tooltip.y = y
+            tooltip.timer = 5.0  -- Keep tooltip visible longer for brief clicks
+            tooltip.persistent = true  -- Mark as persistent tooltip
+        else
+            -- Long click or drag - attempt to sell if in valid context
+            if (state.in_shop or (state.hand and #state.hand > 0)) and clicked_amarraco.amarraco then
+                -- Check if mouse is over discard button for selling
+                if buttons.discard and x >= buttons.discard.x and x <= buttons.discard.x + buttons.discard.width and
+                   y >= buttons.discard.y and y <= buttons.discard.y + buttons.discard.height then
+                    -- Sell the amarraco for 1 peseta
+                    state.pesetas = state.pesetas + 1
+                    
+                    -- Remove amarraco from owned amarracos
+                    for i, owned_amarraco in ipairs(state.owned_amarracos) do
+                        if owned_amarraco.id == clicked_amarraco.amarraco.id then
+                            table.remove(state.owned_amarracos, i)
+                            break
+                        end
+                    end
+                    
+                    -- Hide tooltip since amarraco is sold
+                    tooltip.active = false
+                    tooltip.persistent = false
+                else
+                    -- Drag/long click but not over discard area - hide tooltip
+                    tooltip.active = false
+                    tooltip.persistent = false
+                end
+            else
+                -- Hide tooltip for non-selling contexts
+                tooltip.active = false
+                tooltip.persistent = false
+            end
+        end
+        
+        -- Clear click state
+        clicked_amarraco.active = false
+        clicked_amarraco.index = nil
+        clicked_amarraco.amarraco = nil
+        clicked_amarraco.start_time = nil
         return true  -- Was handling a click
     end
     return false  -- Wasn't handling a click
+end
+
+-- Handle amarraco drag drop logic (separated for clarity)
+function ui.handle_amarraco_drag_drop(x, y, state)
+    -- Don't handle amarraco interactions during card selection
+    if state.in_card_selection then
+        return false
+    end
+    
+    if not state.dragging_amarraco then
+        return false
+    end
+    
+    -- Check if mouse is over the discard button area for selling
+    if buttons.discard and x >= buttons.discard.x and x <= buttons.discard.x + buttons.discard.width and
+       y >= buttons.discard.y and y <= buttons.discard.y + buttons.discard.height then
+        -- Sell the amarraco for 1 peseta
+        state.pesetas = state.pesetas + 1
+        
+        -- Remove amarraco from owned amarracos
+        for i, owned_amarraco in ipairs(state.owned_amarracos) do
+            if owned_amarraco.id == state.dragging_amarraco.id then
+                table.remove(state.owned_amarracos, i)
+                break
+            end
+        end
+        
+        -- Clear drag state
+        state.dragging_amarraco = nil
+        state.amarraco_drag_offset_x = 0
+        state.amarraco_drag_offset_y = 0
+        return true
+    end
+    
+    -- If we get here, drop was invalid - just clear drag state
+    state.dragging_amarraco = nil
+    state.amarraco_drag_offset_x = 0
+    state.amarraco_drag_offset_y = 0
+    return false
 end
 
 function ui.draw_sprite_button(sprite, x, y, enabled, scale)
@@ -1639,7 +1766,7 @@ function ui.draw_shop(state)
     ui.draw_shop_buttons(state)
     
     -- 6. Draw sticker item area at same position as combat screen (below deck)
-    if state.hand and #state.hand > 0 then  -- Only show if we have a hand (same condition as combat)
+    if true then  -- Always show sticker area in shop
         local stickers = require("stickers")
         
         -- Use exact same positioning as combat screen
@@ -1670,8 +1797,11 @@ function ui.draw_shop(state)
                 local x = start_x + (i - 1) * (sticker_size + sticker_spacing)
                 local y = start_y
                 
-                love.graphics.setColor(1, 1, 1)
-                stickers.draw_sticker(sticker.id, x, y, 10.0)  -- 10x scale for item area
+                -- Only draw sticker if it's not currently being dragged
+                if not state.dragging_sticker or state.dragging_sticker.id ~= sticker.id then
+                    love.graphics.setColor(1, 1, 1)
+                    stickers.draw_sticker(sticker.id, x, y, 10.0)  -- 10x scale for item area
+                end
                 
                 -- Store bounds for drag detection (same as combat)
                 sticker._item_area_bounds = {x = x, y = y, width = sticker_size, height = sticker_size}
@@ -1797,8 +1927,8 @@ end
 
 -- Check if click is on an amarraco sprite for tooltip
 function ui.check_amarraco_click(x, y, state)
-    -- Check owned amarracos in game view (only when not in shop)
-    if not state.in_shop and state.owned_amarracos and #state.owned_amarracos > 0 then
+    -- Check owned amarracos in game view and shop
+    if state.owned_amarracos and #state.owned_amarracos > 0 then
         for _, amarraco in ipairs(state.owned_amarracos) do
             if amarraco._sprite_bounds then
                 local bounds = amarraco._sprite_bounds
@@ -2080,8 +2210,8 @@ end
 
 -- Handle mouse press for sticker drag start
 function ui.handle_sticker_mouse_press(x, y, state)
-    -- Only handle when we have a hand (preview and combat phases)
-    if not (state.hand and #state.hand > 0) or not state.owned_stickers then
+    -- Only handle when we have a hand (preview and combat phases) or in shop
+    if not ((state.hand and #state.hand > 0) or state.in_shop) or not state.owned_stickers then
         return false
     end
     
@@ -2114,6 +2244,27 @@ function ui.handle_sticker_mouse_release(x, y, state)
     
     local stickers = require("stickers")
     local card = require("card")
+    
+    -- Check if mouse is over the discard button area for selling
+    if buttons.discard and x >= buttons.discard.x and x <= buttons.discard.x + buttons.discard.width and
+       y >= buttons.discard.y and y <= buttons.discard.y + buttons.discard.height then
+        -- Sell the sticker for 1 peseta
+        state.pesetas = state.pesetas + 1
+        
+        -- Remove sticker from owned stickers
+        for i, owned_sticker in ipairs(state.owned_stickers) do
+            if owned_sticker.id == state.dragging_sticker.id then
+                table.remove(state.owned_stickers, i)
+                break
+            end
+        end
+        
+        -- Clear drag state
+        state.dragging_sticker = nil
+        state.drag_offset_x = 0
+        state.drag_offset_y = 0
+        return true
+    end
     
     -- Check if mouse is over a player card
     if state.hand then
@@ -2249,6 +2400,40 @@ function ui.draw_dragging_sticker(state)
                              internal_x - sticker_size/2,  -- Center on mouse cursor
                              internal_y - sticker_size/2,  -- Center on mouse cursor
                              drag_scale)
+    end
+end
+
+-- Draw dragging amarraco on top of all other elements
+function ui.draw_dragging_amarraco(state)
+    if state.dragging_amarraco then
+        local amarracos = require("amarracos")
+        local canvas = require("canvas")
+        local mouse_x, mouse_y = love.mouse.getPosition()
+        local internal_x, internal_y = canvas.transform_mouse_position(mouse_x, mouse_y)
+        
+        -- Draw amarraco at mouse position centered on cursor
+        love.graphics.setColor(1, 1, 1, 0.9)  -- Slightly more opaque for better visibility
+        local drag_scale = 5.0  -- Same scale as when clicked (5x scale)
+        local amarraco_size = 45 * drag_scale  -- 225px at 5x scale
+        
+        local sprite = amarracos.get_sprite(state.dragging_amarraco.id)
+        if sprite then
+            love.graphics.draw(sprite, 
+                             internal_x - amarraco_size/2,  -- Center on mouse cursor
+                             internal_y - amarraco_size/2,  -- Center on mouse cursor
+                             0, drag_scale, drag_scale)
+        else
+            -- Fallback rectangle
+            love.graphics.setColor(0.4, 0.4, 0.4, 0.9)
+            love.graphics.rectangle("fill", 
+                                  internal_x - amarraco_size/2, 
+                                  internal_y - amarraco_size/2, 
+                                  amarraco_size, amarraco_size)
+            love.graphics.setColor(1, 1, 1, 0.9)
+            love.graphics.print(string.sub(state.dragging_amarraco.id, 1, 1), 
+                              internal_x - amarraco_size/2 + 2, 
+                              internal_y - amarraco_size/2 + 2)
+        end
     end
 end
 
