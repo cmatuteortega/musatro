@@ -1,0 +1,7 @@
+¡Llega al objetivo de pitas y derrota al oponente!\n
+
+PITAS TOTALES = X * Y!\n
+X = tu carta más alta\n
+Y = tus parejas!\n
+% impacto = 100% con 31 o más (las figuras cuentan 10)\n
+ESCUDO = 10 -  tu carta más baja\n

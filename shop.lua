@@ -28,12 +28,21 @@ shop.CARD_ITEMS = {
         base_cost = 1,
         effect = "pokemon_choice",
         card_type = "pokemon"
+    },
+    {
+        id = "sticker_bundle",
+        name = "Sticker Bundle",
+        description = "Pick 1 from 3 random stickers",
+        base_cost = 1,
+        effect = "sticker_choice",
+        card_type = "sticker"
     }
 }
 
--- Generate shop items including amarracos
-function shop.generate_shop_items(owned_amarracos)
+-- Generate shop items including amarracos and stickers
+function shop.generate_shop_items(owned_amarracos, owned_stickers)
     local amarracos = require("amarracos")
+    local stickers = require("stickers")
     local items = {}
     
     -- Add card purchase options
@@ -54,6 +63,8 @@ function shop.generate_shop_items(owned_amarracos)
             amarraco_data = amarraco
         })
     end
+    
+    -- Stickers are now purchased through sticker bundle (card-sized option)
     
     return items
 end
@@ -110,6 +121,31 @@ function shop.get_pokemon_choices()
     return card.get_pokemon_choices()
 end
 
+-- Get 3 random sticker choices for sticker bundle
+function shop.get_sticker_choices()
+    local stickers = require("stickers")
+    local all_stickers = stickers.STICKERS
+    local choices = {}
+    
+    -- Get 3 random stickers from all available stickers
+    local sticker_indices = {}
+    for i = 1, #all_stickers do
+        table.insert(sticker_indices, i)
+    end
+    
+    -- Shuffle indices and pick first 3
+    for i = #sticker_indices, 2, -1 do
+        local j = math.random(i)
+        sticker_indices[i], sticker_indices[j] = sticker_indices[j], sticker_indices[i]
+    end
+    
+    for i = 1, math.min(3, #all_stickers) do
+        table.insert(choices, all_stickers[sticker_indices[i]])
+    end
+    
+    return choices
+end
+
 -- Apply upgrade effect to game state
 function shop.apply_upgrade(item_id, game_state, upgrades)
     local item = nil
@@ -134,6 +170,9 @@ function shop.apply_upgrade(item_id, game_state, upgrades)
     elseif item.effect == "pokemon_choice" then
         -- Will trigger Pokemon card selection menu
         return "pokemon_choice"
+    elseif item.effect == "sticker_choice" then
+        -- Will trigger sticker selection menu
+        return "sticker_choice"
     end
     
     return true

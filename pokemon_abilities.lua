@@ -64,7 +64,7 @@ function pokemon_abilities.apply_effects(breakdown, player_hand, ai_hand, game_s
                 if card.pokemon == "Magneton" and ai_hand then
                     local ai_oros_value = 0
                     for _, ai_card in ipairs(ai_hand) do
-                        if ai_card.suit == "Oros" then
+                        if ai_card.suit == "Oros" or (ai_card.attached_sticker == "arcoiris") then
                             local card_value = (ai_card.value >= 11) and 10 or ai_card.value
                             ai_oros_value = ai_oros_value + card_value
                         end
@@ -92,7 +92,7 @@ function pokemon_abilities.apply_effects(breakdown, player_hand, ai_hand, game_s
                 if card.pokemon == "Doublade" then
                     local espadas_count = 0
                     for _, hand_card in ipairs(player_hand) do
-                        if hand_card.suit == "Espadas" then
+                        if hand_card.suit == "Espadas" or (hand_card.attached_sticker == "arcoiris") then
                             espadas_count = espadas_count + 1
                         end
                     end

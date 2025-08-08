@@ -84,6 +84,48 @@ function ui.show_card_tooltip(card_item, x, y)
     tooltip.timer = 3.0  -- Show for 3 seconds
 end
 
+function ui.show_scoring_tooltip(x, y)
+    -- Read scoring instructions from file
+    local instructions = ""
+    if love.filesystem.getInfo("instrucciones.txt") then
+        instructions = love.filesystem.read("instrucciones.txt")
+        -- Convert literal \n to actual newlines
+        instructions = instructions:gsub("\\n", "\n")
+    else
+        -- Fallback text if file not found
+        instructions = "¡Llega al objetivo de pitas y derrota al oponente!\n\nPITAS TOTALES = X * Y!\nX = tu carta más alta\nY = tus parejas!\n% impacto = 100% con 31 o más (las figuras cuentan 10)\nESCUDO = 10 -  tu carta más baja"
+    end
+    
+    tooltip.active = true
+    tooltip.amarraco = {
+        name = "",  -- No title
+        description = instructions
+    }
+    tooltip.card = nil
+    tooltip.tooltip_type = "amarraco"
+    tooltip.x = x
+    tooltip.y = y
+    tooltip.timer = 5.0  -- Show for 5 seconds for instructions
+end
+
+function ui.show_sticker_tooltip(sticker, x, y)
+    local stickers_module = require("stickers")
+    local sticker_data = stickers_module.get_sticker_by_id(sticker.id)
+    
+    if sticker_data then
+        tooltip.active = true
+        tooltip.amarraco = {
+            name = sticker_data.name,
+            description = sticker_data.description
+        }
+        tooltip.card = nil
+        tooltip.tooltip_type = "amarraco"
+        tooltip.x = x
+        tooltip.y = y
+        tooltip.timer = 3.0  -- Show for 3 seconds like other tooltips
+    end
+end
+
 function ui.hide_tooltip()
     tooltip.active = false
     tooltip.amarraco = nil
@@ -128,33 +170,49 @@ function ui.draw_tooltip()
     -- Helper function to wrap text to fit within tooltip width
     local function wrap_text(text, font, max_width)
         local lines = {}
-        local words = {}
-        for word in text:gmatch("%S+") do
-            table.insert(words, word)
+        
+        -- First, split by explicit linebreaks (\n characters)
+        local paragraphs = {}
+        for paragraph in text:gmatch("[^\n]+") do
+            table.insert(paragraphs, paragraph)
         end
         
-        local current_line = ""
+        -- If no linebreaks found, treat entire text as one paragraph
+        if #paragraphs == 0 then
+            table.insert(paragraphs, text)
+        end
+        
         love.graphics.setFont(font)
         
-        for _, word in ipairs(words) do
-            local test_line = (current_line == "") and word or (current_line .. " " .. word)
-            local text_width = font:getWidth(test_line)
+        -- Process each paragraph separately
+        for _, paragraph in ipairs(paragraphs) do
+            local words = {}
+            for word in paragraph:gmatch("%S+") do
+                table.insert(words, word)
+            end
             
-            if text_width <= max_width then
-                current_line = test_line
-            else
-                if current_line ~= "" then
-                    table.insert(lines, current_line)
-                    current_line = word
+            local current_line = ""
+            
+            for _, word in ipairs(words) do
+                local test_line = (current_line == "") and word or (current_line .. " " .. word)
+                local text_width = font:getWidth(test_line)
+                
+                if text_width <= max_width then
+                    current_line = test_line
                 else
-                    -- Single word is too long, break it
-                    table.insert(lines, word)
+                    if current_line ~= "" then
+                        table.insert(lines, current_line)
+                        current_line = word
+                    else
+                        -- Single word is too long, break it
+                        table.insert(lines, word)
+                    end
                 end
             end
-        end
-        
-        if current_line ~= "" then
-            table.insert(lines, current_line)
+            
+            if current_line ~= "" then
+                table.insert(lines, current_line)
+            end
         end
         
         return lines
@@ -183,6 +241,22 @@ function ui.draw_tooltip()
         if tooltip.card.value then
             content_lines.value = "Value: " .. tooltip.card.value
             total_content_height = total_content_height + line_height
+        end
+        
+        -- Sticker information if attached
+        if tooltip.card.attached_sticker then
+            local stickers = require("stickers")
+            local sticker = stickers.get_sticker_by_id(tooltip.card.attached_sticker)
+            if sticker then
+                local sticker_text = "Pegatina: " .. sticker.name
+                content_lines.sticker_name = sticker_text
+                total_content_height = total_content_height + line_height
+                
+                -- Sticker description (wrapped)
+                local sticker_desc_lines = wrap_text(sticker.description, fonts.regular, available_width)
+                content_lines.sticker_desc = sticker_desc_lines
+                total_content_height = total_content_height + (#sticker_desc_lines * line_height)
+            end
         end
     else
         -- Amarraco tooltip
@@ -261,6 +335,22 @@ function ui.draw_tooltip()
             love.graphics.setColor(1, 1, 0.8)
             love.graphics.setFont(fonts.regular)
             love.graphics.print(content_lines.value, tooltip_x + padding, current_y)
+            current_y = current_y + line_height
+        end
+        
+        -- Draw sticker information if available
+        if content_lines.sticker_name then
+            love.graphics.setColor(0.8, 0.3, 1)  -- Purple color for stickers
+            love.graphics.setFont(fonts.regular)
+            love.graphics.print(content_lines.sticker_name, tooltip_x + padding, current_y)
+            current_y = current_y + line_height
+            
+            -- Draw sticker description lines
+            love.graphics.setColor(0.9, 0.7, 1)  -- Lighter purple for description
+            for _, line in ipairs(content_lines.sticker_desc) do
+                love.graphics.print(line, tooltip_x + padding, current_y)
+                current_y = current_y + line_height
+            end
         end
     else
         -- Draw amarraco tooltip with dynamic content
@@ -313,7 +403,7 @@ function ui.update_button_positions()
     
     -- Position sprite buttons around the deck with equal spacing and horizontal alignment
     local deck_x = (screen_width - card.CARD_WIDTH) / 2
-    local deck_y = 1906  -- Positioned 100px below player cards (player cards bottom at y=1806)
+    local deck_y = 1906  -- Positioned 100px below player cards (player cards bottom at y=1756)
     local deck_center_y = deck_y + card.CARD_HEIGHT / 2 - ui.SPRITE_BUTTON_SIZE / 2  -- Center sprite buttons vertically with deck
     local button_spacing = 60  -- Equal space between deck and each button (scaled for iPhone canvas)
     
@@ -332,7 +422,7 @@ function ui.update_button_positions()
 end
 
 function ui.get_hand_y_position()
-    return 1400  -- Player hand positioned below AI cards with extra separation
+    return 1350  -- Player hand moved up 50px from 1400 to better center between amarracos and deck
 end
 
 function ui.draw_title_and_scores(state)
@@ -346,47 +436,37 @@ function ui.draw_title_and_scores(state)
     local round_width = fonts.pixel_small:getWidth(round_text)
     love.graphics.print(round_text, screen_width - round_width - 80, 80)
     
-    -- Player HP (bottom left corner, indented)
-    love.graphics.setFont(fonts.regular)
-    love.graphics.setColor(0.2, 1, 0.2)  -- Green for player
-    local player_hp_text = "PLAYER: " .. state.player_hp .. " HP"
-    love.graphics.print(player_hp_text, 80, 2500)
+    -- Get screen dimensions for bottom positioning
+    local screen_width, screen_height = ui.get_screen_dimensions()
+    local offset = 20  -- Offset from window border
     
-    -- Player HP bar (bottom left corner, indented)
-    ui.draw_hp_bar(80, 2600, 480, 32, state.player_hp, state.base_player_hp, {0.2, 1, 0.2}, {0.2, 0.4, 0.2})
+    -- HP and pesetas will be drawn inside combat/preview blocks for proper positioning
     
-    -- Player hit/miss animation under player HP bar
-    if state.player_hit_animation.active then
-        love.graphics.setColor(state.player_hit_animation.text == "HIT!" and {0, 1, 0} or {1, 0, 0})
-        love.graphics.setFont(fonts.regular)
-        local text_width = fonts.regular:getWidth(state.player_hit_animation.text)
-        love.graphics.print(state.player_hit_animation.text, 80 + (480 - text_width) / 2, 2650)
-    end
     
-    -- Pesetas (bottom left corner, below player HP, indented)
-    love.graphics.setFont(fonts.regular)
-    love.graphics.setColor(1, 1, 0)  -- Yellow for pesetas
-    local pesetas_text = "PESETAS: " .. state.pesetas
-    local pesetas_width = fonts.regular:getWidth(pesetas_text)
-    love.graphics.print(pesetas_text, 80, 2750)
+    -- AI HP number (top right corner, below round, indented) - huge 250px font
+    local ai_hp_y = 180
+    love.graphics.setFont(fonts.pixel_huge)  -- 250px font for maximum visibility
+    love.graphics.setColor(0.05, 0.05, 0.05)  -- Almost black for AI
+    local ai_hp_number = tostring(state.ai_hp)
+    local ai_hp_number_width = fonts.pixel_huge:getWidth(ai_hp_number)
+    local ai_hp_x = screen_width - ai_hp_number_width - 80
+    love.graphics.print(ai_hp_number, ai_hp_x, ai_hp_y)
     
-    -- AI HP (top right corner, below round, indented)
-    love.graphics.setFont(fonts.regular)
-    love.graphics.setColor(1, 0.2, 0.2)  -- Red for AI
-    local ai_hp_text = "AI: " .. state.ai_hp .. " HP"
-    local ai_hp_width = fonts.regular:getWidth(ai_hp_text)
-    love.graphics.print(ai_hp_text, screen_width - ai_hp_width - 80, 180)
+    -- AI "PITAS" label directly below HP number - small font
+    love.graphics.setFont(fonts.regular)  -- Small font for label
+    love.graphics.setColor(0.05, 0.05, 0.05)  -- Almost black for AI
+    local pitas_label = "PITAS"
+    local pitas_width = fonts.regular:getWidth(pitas_label)
+    local pitas_y = ai_hp_y + 230  -- Below the 250px font (30px closer: 260 - 30 = 230)
+    love.graphics.print(pitas_label, ai_hp_x + (ai_hp_number_width - pitas_width) / 2, pitas_y)  -- Centered under HP number
     
-    -- AI HP bar (need to calculate AI max HP)
-    local ai_max_hp = 25 + math.floor((state.round - 1) * 15)  -- Same calculation as ai.calculate_hp()
-    ui.draw_hp_bar(screen_width - 480 - 80, 280, 480, 32, state.ai_hp, ai_max_hp, {1, 0.2, 0.2}, {0.4, 0.2, 0.2})
-    
-    -- AI hit/miss animation under AI HP bar
+    -- AI hit/miss animation below PITAS label
     if state.ai_hit_animation.active then
         love.graphics.setColor(state.ai_hit_animation.text == "HIT!" and {0, 1, 0} or {1, 0, 0})
         love.graphics.setFont(fonts.regular)
         local text_width = fonts.regular:getWidth(state.ai_hit_animation.text)
-        love.graphics.print(state.ai_hit_animation.text, screen_width - 480 - 80 + (480 - text_width) / 2, 330)
+        local hit_y = pitas_y + 60  -- Below PITAS label
+        love.graphics.print(state.ai_hit_animation.text, ai_hp_x + (ai_hp_number_width - text_width) / 2, hit_y)  -- Centered under HP number
     end
     
     if state.in_combat then
@@ -398,10 +478,10 @@ function ui.draw_title_and_scores(state)
             local scoring_animation = require("scoring_animation")
             local formula_highlights = scoring_animation.get_formula_highlights()
             
-            love.graphics.setFont(fonts.pixel_small)
+            love.graphics.setFont(fonts.pixel_big)  -- Twice as big
             local calc_text = string.format("%d x %d = %d (%.0f%%)", 
                                            breakdown.grandes, breakdown.total_multiplier, breakdown.damage, breakdown.accuracy)
-            local calc_width = fonts.pixel_small:getWidth(calc_text)
+            local calc_width = fonts.pixel_big:getWidth(calc_text)
             local calc_x = 80  -- Top-left corner with indent
             
             -- Draw each component with potential highlighting
@@ -412,30 +492,30 @@ function ui.draw_title_and_scores(state)
             local color = formula_highlights.grandes and {1, 0.3, 0.3} or {1, 1, 1}
             love.graphics.setColor(color)
             love.graphics.print(grandes_text, calc_x + x_offset, 80)
-            x_offset = x_offset + fonts.pixel_small:getWidth(grandes_text)
+            x_offset = x_offset + fonts.pixel_big:getWidth(grandes_text)
             
             -- " x " separator
             love.graphics.setColor(1, 1, 1)
             love.graphics.print(" x ", calc_x + x_offset, 80)
-            x_offset = x_offset + fonts.pixel_small:getWidth(" x ")
+            x_offset = x_offset + fonts.pixel_big:getWidth(" x ")
             
             -- Multiplier component
             local mult_text = tostring(breakdown.total_multiplier)
             color = formula_highlights.pares and {1, 0.3, 1} or {1, 1, 1}
             love.graphics.setColor(color)
             love.graphics.print(mult_text, calc_x + x_offset, 80)
-            x_offset = x_offset + fonts.pixel_small:getWidth(mult_text)
+            x_offset = x_offset + fonts.pixel_big:getWidth(mult_text)
             
             -- " = " separator
             love.graphics.setColor(1, 1, 1)
             love.graphics.print(" = ", calc_x + x_offset, 80)
-            x_offset = x_offset + fonts.pixel_small:getWidth(" = ")
+            x_offset = x_offset + fonts.pixel_big:getWidth(" = ")
             
             -- Damage result
             local damage_text = tostring(breakdown.damage)
             love.graphics.setColor(1, 1, 1)
             love.graphics.print(damage_text, calc_x + x_offset, 80)
-            x_offset = x_offset + fonts.pixel_small:getWidth(damage_text)
+            x_offset = x_offset + fonts.pixel_big:getWidth(damage_text)
             
             -- Accuracy component
             local acc_text = string.format(" (%.0f%%)", breakdown.accuracy)
@@ -443,12 +523,59 @@ function ui.draw_title_and_scores(state)
             love.graphics.setColor(color)
             love.graphics.print(acc_text, calc_x + x_offset, 80)
             
-            -- Shield display (fifth row)
-            love.graphics.setColor(0.8, 0.8, 1)  -- Light blue for shield
+            -- PITAS with shield bonus - 100px below formula (80 + 100 = 180)
+            love.graphics.setColor(0.2, 1, 0.2)  -- Green for PITAS
+            love.graphics.setFont(fonts.pixel_small)  -- Twice the size of regular font
+            local shield_value = breakdown.defense or 0
+            local pitas_shield_text = string.format("PITAS: %d (+%d)", state.player_hp, shield_value)
+            love.graphics.print(pitas_shield_text, 80, 180)
+            
+            -- Player hit/miss animation next to PITAS display
+            if state.player_hit_animation.active then
+                love.graphics.setColor(state.player_hit_animation.text == "HIT!" and {0, 1, 0} or {1, 0, 0})
+                love.graphics.setFont(fonts.regular)  -- Keep animation text at regular size
+                local pitas_text_width = fonts.pixel_small:getWidth(pitas_shield_text)
+                love.graphics.print(state.player_hit_animation.text, 80 + pitas_text_width + 20, 180)
+            end
+            
+            -- Points - 100px below PITAS (180 + 100 = 280)
             love.graphics.setFont(fonts.regular)
-            local shield_text = breakdown.shield_text
-            local shield_width = fonts.regular:getWidth(shield_text)
-            love.graphics.print(shield_text, 80, 180)
+            love.graphics.setColor(1, 1, 0)  -- Yellow for points
+            local points_text = state.pesetas .. " pts"
+            love.graphics.print(points_text, 80, 280)
+            
+            -- Info button - 100px below pesetas (280 + 100 = 380)
+            love.graphics.setFont(fonts.regular)
+            local info_text = "(i)"
+            local info_x = 80
+            local info_y = 380
+            
+            -- Draw clickable info button with background
+            local info_width = fonts.regular:getWidth(info_text)
+            local info_height = fonts.regular:getHeight()
+            local padding = 8
+            
+            -- Background circle
+            love.graphics.setColor(0.3, 0.3, 0.3, 0.8)  -- Semi-transparent dark background
+            love.graphics.circle("fill", info_x + info_width/2, info_y + info_height/2, info_width/2 + padding)
+            
+            -- Border
+            love.graphics.setColor(0.8, 0.8, 0.8)  -- Light gray border
+            love.graphics.setLineWidth(2)
+            love.graphics.circle("line", info_x + info_width/2, info_y + info_height/2, info_width/2 + padding)
+            
+            -- Text
+            love.graphics.setColor(1, 1, 1)  -- White text
+            love.graphics.print(info_text, info_x, info_y)
+            
+            -- Store bounds for click detection (include the circle area)
+            local circle_radius = info_width/2 + padding
+            state._scoring_info_bounds = {
+                x = info_x + info_width/2 - circle_radius, 
+                y = info_y + info_height/2 - circle_radius, 
+                width = circle_radius * 2, 
+                height = circle_radius * 2
+            }
         end
     else
         -- Show current hand scoring preview if hand exists
@@ -472,20 +599,123 @@ function ui.draw_title_and_scores(state)
             
             -- Damage calculation display (fourth row) - DAMAGE x MULT = FINAL_DAMAGE (accuracy %)
             love.graphics.setColor(1, 1, 1)  -- White for the full calculation
-            love.graphics.setFont(fonts.pixel_small)
+            love.graphics.setFont(fonts.pixel_big)  -- Twice as big
             local calc_text = string.format("%d x %d = %d (%.0f%%)", 
                                            final_grandes, final_multiplier, final_damage, final_accuracy)
-            local calc_width = fonts.pixel_small:getWidth(calc_text)
+            local calc_width = fonts.pixel_big:getWidth(calc_text)
             love.graphics.print(calc_text, 80, 80)
             
-            -- Shield display (now at consistent position since amarracos summary removed)
-            love.graphics.setColor(0.8, 0.8, 1)  -- Light blue for shield
+            -- PITAS with shield bonus - 100px below formula (80 + 100 = 180)
+            love.graphics.setColor(0.2, 1, 0.2)  -- Green for PITAS
+            love.graphics.setFont(fonts.pixel_small)  -- Twice the size of regular font
+            local pitas_shield_text = string.format("PITAS: %d (+%d)", state.player_hp, final_defense)
+            love.graphics.print(pitas_shield_text, 80, 180)
+            
+            -- Player hit/miss animation next to PITAS display
+            if state.player_hit_animation.active then
+                love.graphics.setColor(state.player_hit_animation.text == "HIT!" and {0, 1, 0} or {1, 0, 0})
+                love.graphics.setFont(fonts.regular)  -- Keep animation text at regular size
+                local pitas_text_width = fonts.pixel_small:getWidth(pitas_shield_text)
+                love.graphics.print(state.player_hit_animation.text, 80 + pitas_text_width + 20, 180)
+            end
+            
+            -- Points - 100px below PITAS (180 + 100 = 280)
             love.graphics.setFont(fonts.regular)
-            local shield_text = string.format("SHIELD: %d", final_defense)
-            local shield_width = fonts.regular:getWidth(shield_text)
-            love.graphics.print(shield_text, 80, 180)
+            love.graphics.setColor(1, 1, 0)  -- Yellow for points
+            local points_text = state.pesetas .. " pts"
+            love.graphics.print(points_text, 80, 280)
+            
+            -- Info button - 100px below pesetas (280 + 100 = 380)
+            love.graphics.setFont(fonts.regular)
+            local info_text = "(i)"
+            local info_x = 80
+            local info_y = 380
+            
+            -- Draw clickable info button with background
+            local info_width = fonts.regular:getWidth(info_text)
+            local info_height = fonts.regular:getHeight()
+            local padding = 8
+            
+            -- Background circle
+            love.graphics.setColor(0.3, 0.3, 0.3, 0.8)  -- Semi-transparent dark background
+            love.graphics.circle("fill", info_x + info_width/2, info_y + info_height/2, info_width/2 + padding)
+            
+            -- Border
+            love.graphics.setColor(0.8, 0.8, 0.8)  -- Light gray border
+            love.graphics.setLineWidth(2)
+            love.graphics.circle("line", info_x + info_width/2, info_y + info_height/2, info_width/2 + padding)
+            
+            -- Text
+            love.graphics.setColor(1, 1, 1)  -- White text
+            love.graphics.print(info_text, info_x, info_y)
+            
+            -- Store bounds for click detection (include the circle area)
+            local circle_radius = info_width/2 + padding
+            state._scoring_info_bounds = {
+                x = info_x + info_width/2 - circle_radius, 
+                y = info_y + info_height/2 - circle_radius, 
+                width = circle_radius * 2, 
+                height = circle_radius * 2
+            }
         end
     end
+    
+    
+    -- Draw sticker item area (always visible during preview and combat)
+    if state.hand and #state.hand > 0 then
+        local stickers = require("stickers")
+        
+        -- Position centered at bottom with reduced height, lowered by 60px total
+        local deck_bottom = 1906 + 406  -- deck_y + card_height = 2312
+        local item_area_width = 1200  -- Twice as wide (600 * 2)
+        local item_area_height = 300  -- Much shorter height (360 - 60)
+        local area_x = (screen_width - item_area_width) / 2  -- Perfectly centered horizontally
+        local area_y = deck_bottom + (screen_height - deck_bottom - item_area_height) / 2 + 60  -- Halfway between deck bottom and screen bottom + 60px lower
+        
+        -- Draw item area background (more translucent)
+        love.graphics.setColor(0.2, 0.2, 0.2, 0.4)  -- Reduced alpha from 0.8 to 0.4
+        love.graphics.rectangle("fill", area_x, area_y, item_area_width, item_area_height)
+        love.graphics.setColor(1, 1, 1, 0.6)  -- Also make border more translucent
+        love.graphics.rectangle("line", area_x, area_y, item_area_width, item_area_height)
+        
+        -- Title removed for cleaner look
+        
+        -- Draw owned stickers horizontally (max 3) - 10x scale
+        if state.owned_stickers and #state.owned_stickers > 0 then
+            local sticker_size = 200  -- 20px base * 10x scale
+            local sticker_spacing = 80  -- Twice the spacing (40 * 2)
+            local max_stickers = 3  -- Maximum stickers player can hold
+            local stickers_to_show = math.min(#state.owned_stickers, max_stickers)
+            local total_width = stickers_to_show * sticker_size + (stickers_to_show - 1) * sticker_spacing
+            local start_x = area_x + (item_area_width - total_width) / 2  -- Center stickers in area
+            local start_y = area_y + (item_area_height - sticker_size) / 2  -- Center vertically
+            
+            for i = 1, stickers_to_show do
+                local sticker = state.owned_stickers[i]
+                local x = start_x + (i - 1) * (sticker_size + sticker_spacing)
+                local y = start_y
+                
+                -- Only draw sticker if it's not currently being dragged
+                if not state.dragging_sticker or state.dragging_sticker.id ~= sticker.id then
+                    love.graphics.setColor(1, 1, 1)
+                    stickers.draw_sticker(sticker.id, x, y, 10.0)  -- 10x scale for item area
+                end
+                
+                -- Store bounds for drag detection
+                sticker._item_area_bounds = {x = x, y = y, width = sticker_size, height = sticker_size}
+            end
+        else
+            -- Show empty item area message
+            love.graphics.setFont(fonts.regular)
+            love.graphics.setColor(0.6, 0.6, 0.6)  -- Gray color for empty state
+            local empty_text = "No pegatinas owned"
+            local text_width = fonts.regular:getWidth(empty_text)
+            local text_height = fonts.regular:getHeight()
+            love.graphics.print(empty_text, area_x + (item_area_width - text_width) / 2, area_y + (item_area_height - text_height) / 2)
+        end
+    end
+    
+    -- Dragging sticker moved to separate function for proper layering
 end
 
 function ui.draw_hand_label()
@@ -544,7 +774,6 @@ function ui.draw_scoring_animations()
         return
     end
     
-    -- DEBUG: Show current animation phase and status
     local current_phase = scoring_animation.get_phase()
     local highlighted_amarracos = scoring_animation.get_highlighted_amarracos()
     
@@ -596,7 +825,7 @@ end
 function ui.draw_deck(state)
     local screen_width, _ = ui.get_screen_dimensions()
     local deck_x = (screen_width - card.CARD_WIDTH) / 2
-    local deck_y = 1906  -- Positioned 100px below player cards (player cards bottom at y=1806)
+    local deck_y = 1906  -- Positioned 100px below player cards (player cards bottom at y=1756)
     
     -- Calculate total deck size (remaining + in hand)
     local total_deck_size = #state.deck + #state.hand
@@ -614,7 +843,7 @@ function ui.draw_amarracos(state)
         
         -- Calculate horizontal layout with pixel-perfect scaling for iPhone canvas
         local base_sprite_size = 45  -- Amarracos base size (actual sprite size)
-        local display_scale = 5.0  -- 5.0x scale = 225px (bigger sprites on 4x iPhone canvas)
+        local display_scale = 4.0  -- 4.0x scale = 180px (optimal size for 4x iPhone canvas)
         local final_sprite_size = base_sprite_size * display_scale
         local sprite_spacing = 15  -- Proportionally scaled spacing for 4x canvas
         local total_width = #state.owned_amarracos * final_sprite_size + (#state.owned_amarracos - 1) * sprite_spacing
@@ -856,7 +1085,7 @@ function ui.draw_ai_cards(state)
             local ai_cards = state.ai_played_cards
             local total_width = (#ai_cards - 1) * (card.CARD_WIDTH + card.CARD_SPACING) + card.CARD_WIDTH
             local offset_x = (screen_width - total_width) / 2
-            local ai_y = 900  -- AI hand in upper area of screen
+            local ai_y = 850  -- AI hand moved up 50px from 900 to better center between amarracos and deck
             
             
             -- Set card positions for animations
@@ -902,7 +1131,7 @@ function ui.draw_ai_cards(state)
             -- No label for AI hand
             local total_width = (4 - 1) * (card.CARD_WIDTH + card.CARD_SPACING) + card.CARD_WIDTH
             local offset_x = (screen_width - total_width) / 2
-            local ai_y = 900  -- AI hand in upper area of screen
+            local ai_y = 850  -- AI hand moved up 50px from 900 to better center between amarracos and deck
             
             for i = 1, 4 do
                 local x = offset_x + (i - 1) * (card.CARD_WIDTH + card.CARD_SPACING)
@@ -976,6 +1205,10 @@ end
 function ui.draw_card_selection(state)
     local screen_width, screen_height = ui.get_screen_dimensions()
     
+    -- Clear background with original green color
+    love.graphics.setColor(0, 0.4, 0)  -- Original green background
+    love.graphics.rectangle("fill", 0, 0, screen_width, screen_height)
+    
     -- Title
     love.graphics.setFont(fonts.pixel_big)
     love.graphics.setColor(1, 1, 1)
@@ -986,26 +1219,42 @@ function ui.draw_card_selection(state)
         title = "ELIGE CARTA LIGA"
     elseif state.card_selection_type == "pokemon_choice" then
         title = "ELIGE CARTA POKEMON"
+    elseif state.card_selection_type == "sticker_choice" then
+        title = "ELIGE PEGATINA"
     elseif state.card_selection_type == "booster" then
         title = "BOOSTER PACK"
     elseif state.card_selection_type == "amarracos" then
         title = "AMARRACOS"
     end
     local title_width = fonts.pixel_big:getWidth(title)
-    love.graphics.print(title, (screen_width - title_width) / 2, 400)
+    love.graphics.print(title, (screen_width - title_width) / 2, 200)  -- Moved title higher
     
     if state.card_selection_type == "amarracos" then
         -- Draw amarracos as text boxes instead of cards
         local item_height = 80
-        local start_y = 600
+        local start_y = 400  -- Moved higher for better positioning
         
         for i, amarraco in ipairs(state.card_selection_cards) do
             local y = start_y + (i - 1) * item_height
             
-            -- Background for selected item
+            -- Store sprite bounds for click detection
+            amarraco._sprite_bounds = {x = 20, y = y - 5, width = screen_width - 40, height = item_height - 10}
+            
+            -- Background for selected item (same glow effect as other selections)
             if i == state.selected_card_index then
-                love.graphics.setColor(0.3, 0.5, 0.8, 0.4)  -- Blue highlight
+                -- Glowing selection effect with multiple layers
+                love.graphics.setColor(1, 1, 0, 0.3)  -- Outer glow
+                love.graphics.rectangle("fill", 10, y - 15, screen_width - 20, item_height + 10)
+                love.graphics.setColor(1, 1, 0, 0.5)  -- Middle glow
+                love.graphics.rectangle("fill", 15, y - 10, screen_width - 30, item_height)
+                love.graphics.setColor(1, 1, 0, 0.7)  -- Inner highlight
                 love.graphics.rectangle("fill", 20, y - 5, screen_width - 40, item_height - 10)
+                
+                -- Bright border outline
+                love.graphics.setColor(1, 1, 0, 1)  -- Full yellow border
+                love.graphics.setLineWidth(4)
+                love.graphics.rectangle("line", 18, y - 7, screen_width - 36, item_height - 6)
+                love.graphics.setLineWidth(1)  -- Reset line width
             end
             
             -- Item name
@@ -1030,20 +1279,82 @@ function ui.draw_card_selection(state)
             local cost_width = fonts.pixel_small:getWidth(cost_text)
             love.graphics.print(cost_text, screen_width - cost_width - 40, y + 25)
         end
+    elseif state.card_selection_type == "sticker_choice" then
+        -- Draw stickers as sticker sprites instead of cards
+        local item_height = 200  -- Height for sticker display
+        local sticker_size = 180  -- 20px base * 9x scale for selection
+        local spacing = 40
+        local total_width = #state.card_selection_cards * sticker_size + (#state.card_selection_cards - 1) * spacing
+        local start_x = (screen_width - total_width) / 2
+        local start_y = 350  -- Moved higher for better positioning
+        
+        local stickers = require("stickers")
+        
+        for i, selection_sticker in ipairs(state.card_selection_cards) do
+            local x = start_x + (i - 1) * (sticker_size + spacing)
+            local y = start_y
+            
+            -- Highlight selected sticker with same glow effect as shop
+            if i == state.selected_card_index then
+                -- Glowing selection effect with multiple layers
+                love.graphics.setColor(1, 1, 0, 0.3)  -- Outer glow
+                love.graphics.rectangle("fill", x - 20, y - 20, sticker_size + 40, sticker_size + 90)
+                love.graphics.setColor(1, 1, 0, 0.5)  -- Middle glow
+                love.graphics.rectangle("fill", x - 15, y - 15, sticker_size + 30, sticker_size + 80)
+                love.graphics.setColor(1, 1, 0, 0.7)  -- Inner highlight
+                love.graphics.rectangle("fill", x - 10, y - 10, sticker_size + 20, sticker_size + 70)
+                
+                -- Bright border outline
+                love.graphics.setColor(1, 1, 0, 1)  -- Full yellow border
+                love.graphics.setLineWidth(4)
+                love.graphics.rectangle("line", x - 8, y - 8, sticker_size + 16, sticker_size + 66)
+                love.graphics.setLineWidth(1)  -- Reset line width
+            end
+            
+            -- Draw sticker sprite
+            love.graphics.setColor(1, 1, 1)
+            stickers.draw_sticker(selection_sticker.id, x, y, 9.0)  -- 9x scale for selection
+            
+            -- Draw sticker name
+            love.graphics.setFont(fonts.pixel_small)
+            love.graphics.setColor(1, 1, 1)
+            local name_width = fonts.pixel_small:getWidth(selection_sticker.name)
+            love.graphics.print(selection_sticker.name, x + (sticker_size - name_width) / 2, y + sticker_size + 10)
+            
+            -- Draw sticker description
+            love.graphics.setFont(fonts.regular)
+            love.graphics.setColor(0.8, 0.8, 0.8)
+            local desc_width = fonts.regular:getWidth(selection_sticker.description)
+            love.graphics.print(selection_sticker.description, x + (sticker_size - desc_width) / 2, y + sticker_size + 35)
+            
+            -- Store sprite bounds for click detection
+            selection_sticker._sprite_bounds = {x = x, y = y, width = sticker_size, height = sticker_size}
+        end
     else
         -- Draw cards horizontally (existing logic)
         local card_spacing = 20
         local total_width = #state.card_selection_cards * (card.CARD_WIDTH + card_spacing) - card_spacing
         local start_x = (screen_width - total_width) / 2
-        local card_y = 600
+        local card_y = 350  -- Moved higher for better positioning
         
         for i, selection_card in ipairs(state.card_selection_cards) do
             local x = start_x + (i - 1) * (card.CARD_WIDTH + card_spacing)
             
-            -- Highlight selected card
+            -- Highlight selected card with same glow effect as shop
             if i == state.selected_card_index then
-                love.graphics.setColor(1, 1, 0, 0.3)  -- Yellow highlight
-                love.graphics.rectangle("fill", x - 5, card_y - 5, card.CARD_WIDTH + 10, card.CARD_HEIGHT + 10)
+                -- Glowing selection effect with multiple layers
+                love.graphics.setColor(1, 1, 0, 0.3)  -- Outer glow
+                love.graphics.rectangle("fill", x - 20, card_y - 20, card.CARD_WIDTH + 40, card.CARD_HEIGHT + 40)
+                love.graphics.setColor(1, 1, 0, 0.5)  -- Middle glow
+                love.graphics.rectangle("fill", x - 15, card_y - 15, card.CARD_WIDTH + 30, card.CARD_HEIGHT + 30)
+                love.graphics.setColor(1, 1, 0, 0.7)  -- Inner highlight
+                love.graphics.rectangle("fill", x - 10, card_y - 10, card.CARD_WIDTH + 20, card.CARD_HEIGHT + 20)
+                
+                -- Bright border outline
+                love.graphics.setColor(1, 1, 0, 1)  -- Full yellow border
+                love.graphics.setLineWidth(4)
+                love.graphics.rectangle("line", x - 8, card_y - 8, card.CARD_WIDTH + 16, card.CARD_HEIGHT + 16)
+                love.graphics.setLineWidth(1)  -- Reset line width
             end
             
             -- Draw card
@@ -1059,38 +1370,104 @@ function ui.draw_card_selection(state)
                 pokemon = selection_card.pokemon  -- For Pokemon cards
             }
             card.draw_card(display_card, fonts.regular)
+            
+            -- Store sprite bounds for click detection
+            selection_card._sprite_bounds = {x = x, y = card_y, width = card.CARD_WIDTH, height = card.CARD_HEIGHT}
         end
     end
     
-    -- Instructions
-    love.graphics.setFont(fonts.regular)
-    love.graphics.setColor(0.7, 0.7, 0.7)
-    local instructions = "←→ Navegar • ENTER/SPACE Seleccionar • ESC Cancelar"
-    local inst_width = fonts.regular:getWidth(instructions)
-    love.graphics.print(instructions, (screen_width - inst_width) / 2, screen_height - 40)
+    -- Draw deck and buttons for all selection types (same as shop)
+    if state.card_selection_type == "card_choice" or state.card_selection_type == "liga_choice" or 
+       state.card_selection_type == "pokemon_choice" or state.card_selection_type == "sticker_choice" or
+       state.card_selection_type == "amarracos" then
+        -- Draw deck at same position as shop/combat
+        ui.draw_deck(state)
+        
+        -- Draw selection buttons (same functionality as shop)
+        ui.draw_card_selection_buttons(state)
+        
+        -- Instructions for click-to-select (all types now use this)
+        love.graphics.setFont(fonts.regular)
+        love.graphics.setColor(0.7, 0.7, 0.7)
+        local instructions = "CLICK OPTION • SELECT BUTTON • ESC Cancelar"
+        local inst_width = fonts.regular:getWidth(instructions)
+        love.graphics.print(instructions, (screen_width - inst_width) / 2, screen_height - 40)
+    else
+        -- Fallback (should not be reached)
+        love.graphics.setFont(fonts.regular)
+        love.graphics.setColor(0.7, 0.7, 0.7)
+        local instructions = "ESC Cancelar"
+        local inst_width = fonts.regular:getWidth(instructions)
+        love.graphics.print(instructions, (screen_width - inst_width) / 2, screen_height - 40)
+    end
+end
+
+function ui.draw_card_selection_buttons(state)
+    -- Use exact same button positions as combat screen and shop
+    -- The purchase button will confirm the card/sticker selection
+    
+    -- Draw discard button (cancel) on the left
+    love.graphics.setColor(1, 1, 1)
+    local card = require("card")
+    local discard_sprite = card.get_discard_hand_sprite()
+    if discard_sprite then
+        love.graphics.draw(discard_sprite, buttons.discard.x, buttons.discard.y, 0, 10.0, 10.0)
+        
+        -- Add "CANCEL" label below discard button
+        love.graphics.setFont(fonts.regular)
+        love.graphics.setColor(1, 0.5, 0.5)  -- Red text
+        local cancel_text = "CANCEL"
+        local text_width = fonts.regular:getWidth(cancel_text)
+        love.graphics.print(cancel_text, buttons.discard.x + (ui.SPRITE_BUTTON_SIZE - text_width) / 2, buttons.discard.y + ui.SPRITE_BUTTON_SIZE + 10)
+    end
+    
+    -- Draw play button (confirm selection) on the right
+    love.graphics.setColor(1, 1, 1)
+    local play_sprite = card.get_play_hand_sprite()
+    if play_sprite then
+        love.graphics.draw(play_sprite, buttons.play.x, buttons.play.y, 0, 10.0, 10.0)
+        
+        -- Add "SELECT" label below play button
+        love.graphics.setFont(fonts.regular)
+        love.graphics.setColor(0, 1, 0)  -- Green text
+        local select_text = "SELECT"
+        local text_width = fonts.regular:getWidth(select_text)
+        love.graphics.print(select_text, buttons.play.x + (ui.SPRITE_BUTTON_SIZE - text_width) / 2, buttons.play.y + ui.SPRITE_BUTTON_SIZE + 10)
+        
+        -- Show if no item is selected
+        if not state.selected_card_index or state.selected_card_index == 0 then
+            love.graphics.setColor(0.7, 0.7, 0.7)  -- Gray if no selection
+            love.graphics.print(select_text, buttons.play.x + (ui.SPRITE_BUTTON_SIZE - text_width) / 2, buttons.play.y + ui.SPRITE_BUTTON_SIZE + 10)
+        end
+    end
 end
 
 function ui.draw_shop(state)
     local screen_width, screen_height = ui.get_screen_dimensions()
     
-    -- Shop title
+    -- 1. QUIOSCO title at top
     love.graphics.setFont(fonts.pixel_big)
     love.graphics.setColor(1, 1, 1)
     local title = "QUIOSCO"
     local title_width = fonts.pixel_big:getWidth(title)
-    love.graphics.print(title, (screen_width - title_width) / 2, 400)
+    local title_y = 200
+    love.graphics.print(title, (screen_width - title_width) / 2, title_y)
     
-    -- Pesetas display
+    -- 2. Pesetas amount below title
     love.graphics.setFont(fonts.pixel_small)
-    local pesetas_text = "Pesetas: " .. state.pesetas
+    love.graphics.setColor(1, 1, 0)  -- Yellow
+    local pesetas_text = state.pesetas .. " pts"
     local pesetas_width = fonts.pixel_small:getWidth(pesetas_text)
-    love.graphics.print(pesetas_text, (screen_width - pesetas_width) / 2, 450)
+    local pesetas_y = title_y + 120
+    love.graphics.print(pesetas_text, (screen_width - pesetas_width) / 2, pesetas_y)
     
-    -- Shop items - separate card items from amarracos
-    local item_start_y = 520
-    local current_y = item_start_y
+    -- 3. Draw owned amarracos at same position as combat screen (y=500)
+    ui.draw_amarracos(state)
     
-    -- Separate card items from amarracos
+    -- 4. Shop items start after amarracos area (y=500 + spacing)
+    local current_y = 800  -- Start shop items after amarracos area
+    
+    -- Separate card items and amarracos (stickers are now card-sized bundles)
     local card_items = {}
     local amarraco_items = {}
     
@@ -1102,19 +1479,16 @@ function ui.draw_shop(state)
         end
     end
     
-    -- Draw card items section (side by side)
+    -- Draw card items section
     if #card_items > 0 then
-        love.graphics.setFont(fonts.pixel_small)
-        love.graphics.setColor(0.8, 1, 0.8)  -- Light green for cards
-        love.graphics.print("CARTAS:", 25, current_y - 20)
         
-        -- Calculate side-by-side layout using 7x scaled card dimensions (matching game cards)
-        local card_width = 45 * 7   -- 315px (7x scale to match game cards)
-        local card_height = 58 * 7  -- 406px (7x scale to match game cards)
-        local card_spacing = 60  -- Increased spacing for larger 7x scaled cards
+        -- Calculate layout using same scale as combat screen
+        local card_width = 45 * 7.0   -- 315px (7x scale, same as combat)
+        local card_height = 58 * 7.0  -- 406px (7x scale, same as combat)
+        local card_spacing = 20  -- Smaller spacing for compact layout
         local total_width = #card_items * card_width + (#card_items - 1) * card_spacing
         local start_x = (screen_width - total_width) / 2
-        local card_y = current_y
+        local card_y = current_y  -- Cards positioned at current y position
         
         local card = require("card")
         
@@ -1126,26 +1500,39 @@ function ui.draw_shop(state)
             local cost = shop.get_item_cost(item.id, state.upgrades or {})
             local affordable = state.pesetas >= cost
             
-            -- Background for selected item
+            -- Background for selected item (new click-to-select system)
             if i == state.selected_shop_item then
-                love.graphics.setColor(0.5, 0.8, 0.5, 0.4)  -- Green highlight
-                love.graphics.rectangle("fill", x - 5, card_y - 5, card_width + 10, card_height + 35)
+                -- Glowing selection effect with multiple layers
+                love.graphics.setColor(1, 1, 0, 0.3)  -- Outer glow
+                love.graphics.rectangle("fill", x - 20, card_y - 20, card_width + 40, card_height + 70)
+                love.graphics.setColor(1, 1, 0, 0.5)  -- Middle glow
+                love.graphics.rectangle("fill", x - 15, card_y - 15, card_width + 30, card_height + 60)
+                love.graphics.setColor(1, 1, 0, 0.7)  -- Inner highlight
+                love.graphics.rectangle("fill", x - 10, card_y - 10, card_width + 20, card_height + 50)
+                
+                -- Bright border outline
+                love.graphics.setColor(1, 1, 0, 1)  -- Full yellow border
+                love.graphics.setLineWidth(4)
+                love.graphics.rectangle("line", x - 8, card_y - 8, card_width + 16, card_height + 46)
+                love.graphics.setLineWidth(1)  -- Reset line width
             end
             
-            -- Draw card back sprite with 2.0x integer scaling
+            -- Draw card back sprite with combat scaling
             love.graphics.setColor(affordable and 1 or 0.5, affordable and 1 or 0.5, affordable and 1 or 0.5)
             local back_sprite
             if item.card_type == "liga" then
                 back_sprite = card.get_liga_back_sprite()
             elseif item.card_type == "pokemon" then
                 back_sprite = card.get_poke_back_sprite()
+            elseif item.card_type == "sticker" then
+                back_sprite = card.get_back_sprite()  -- Use regular Spanish card back for sticker bundle
             else
                 back_sprite = card.get_back_sprite()
             end
             
             if back_sprite then
-                -- Use 7.0x integer scaling to match game cards
-                love.graphics.draw(back_sprite, x, card_y, 0, 7.0, 7.0)  -- 7x scaling to match game cards
+                -- Use 7.0x scaling same as combat screen
+                love.graphics.draw(back_sprite, x, card_y, 0, 7.0, 7.0)  -- 7x scaling same as combat
             else
                 -- Fallback rectangle using card dimensions
                 love.graphics.rectangle("fill", x, card_y, card_width, card_height)
@@ -1165,23 +1552,27 @@ function ui.draw_shop(state)
             love.graphics.print(cost_text, x + (card_width - text_width) / 2, card_y + card_height + 3)
         end
         
-        current_y = current_y + card_height + 80  -- Account for larger card height + subtitle with extra spacing
+        current_y = current_y + card_height + 43  -- Account for card height + subtitle + 40px spacing to next section
     end
     
-    -- Draw amarracos section - horizontal layout with sprites and cost subtitles
+    -- Calculate centered position for amarracos between card options and deck
+    local deck_y = 1906
+    local available_space = deck_y - current_y  -- Space between card options end and deck start
+    local amarraco_sprite_size = 45 * 6.0  -- 270px (6x scale)
+    local amarraco_section_height = amarraco_sprite_size + 23  -- Sprite + cost subtitle
+    local amarraco_y = current_y + (available_space - amarraco_section_height) / 2  -- Center in available space
+    
+    -- Draw amarracos section
     if #amarraco_items > 0 then
-        love.graphics.setFont(fonts.pixel_small)
-        love.graphics.setColor(1, 0.8, 0.3)  -- Gold color for amarracos
-        love.graphics.print("AMARRACOS:", 25, current_y - 20)
         
-        -- Calculate horizontal layout for amarracos with pixel-perfect scaling for iPhone canvas
+        -- Calculate layout for amarracos using same scale as combat screen
         local base_sprite_size = 45  -- Amarracos base size
-        local display_scale = 5.0  -- 5.0x scale = 225px (matching combat screen size)
+        local display_scale = 6.0  -- Increased scale for better visibility (6.0x = 270px)
         local final_sprite_size = base_sprite_size * display_scale
-        local sprite_spacing = 35  -- Increased spacing for better layout with larger items
+        local sprite_spacing = 15  -- Smaller spacing for compact layout
         local total_width = #amarraco_items * final_sprite_size + (#amarraco_items - 1) * sprite_spacing
         local start_x = (screen_width - total_width) / 2
-        local sprite_y = current_y
+        local sprite_y = amarraco_y  -- Sprites positioned at centered y position
         
         local amarracos = require("amarracos")
         
@@ -1193,10 +1584,21 @@ function ui.draw_shop(state)
             local cost = item.base_cost
             local affordable = state.pesetas >= cost
             
-            -- Background for selected item
+            -- Background for selected item (new click-to-select system)
             if i == state.selected_shop_item then
-                love.graphics.setColor(0.8, 0.5, 0.2, 0.4)  -- Gold highlight
-                love.graphics.rectangle("fill", x - 5, sprite_y - 5, final_sprite_size + 10, final_sprite_size + 35)
+                -- Glowing selection effect with multiple layers
+                love.graphics.setColor(1, 1, 0, 0.3)  -- Outer glow
+                love.graphics.rectangle("fill", x - 20, sprite_y - 20, final_sprite_size + 40, final_sprite_size + 60)
+                love.graphics.setColor(1, 1, 0, 0.5)  -- Middle glow
+                love.graphics.rectangle("fill", x - 15, sprite_y - 15, final_sprite_size + 30, final_sprite_size + 50)
+                love.graphics.setColor(1, 1, 0, 0.7)  -- Inner highlight
+                love.graphics.rectangle("fill", x - 10, sprite_y - 10, final_sprite_size + 20, final_sprite_size + 40)
+                
+                -- Bright border outline
+                love.graphics.setColor(1, 1, 0, 1)  -- Full yellow border
+                love.graphics.setLineWidth(4)
+                love.graphics.rectangle("line", x - 8, sprite_y - 8, final_sprite_size + 16, final_sprite_size + 36)
+                love.graphics.setLineWidth(1)  -- Reset line width
             end
             
             -- Draw amarraco sprite with integer scaling for pixel-perfect rendering
@@ -1204,7 +1606,7 @@ function ui.draw_shop(state)
             
             local sprite = amarracos.get_sprite(item.amarraco_data.id)
             if sprite then
-                love.graphics.draw(sprite, x, sprite_y, 0, display_scale, display_scale)  -- Integer scaling for pixel-perfect rendering
+                love.graphics.draw(sprite, x, sprite_y, 0, display_scale, display_scale)  -- 4.0x scaling same as combat
             else
                 -- Fallback rectangle
                 love.graphics.setColor(0.4, 0.4, 0.4)
@@ -1225,13 +1627,70 @@ function ui.draw_shop(state)
             love.graphics.print(cost_text, x + (final_sprite_size - text_width) / 2, sprite_y + final_sprite_size + 3)
         end
         
-        current_y = current_y + final_sprite_size + 60  -- Account for sprite height + subtitle with extra spacing
+        -- Amarracos are now centered, so we don't need to update current_y
+    end
+    
+    -- Stickers are now purchased as card-sized bundles (above)
+    
+    -- 5. Draw deck at same position as combat screen (y=1906)
+    ui.draw_deck(state)
+    
+    -- 6. Draw combat buttons for shop functionality
+    ui.draw_shop_buttons(state)
+    
+    -- 6. Draw sticker item area at same position as combat screen (below deck)
+    if state.hand and #state.hand > 0 then  -- Only show if we have a hand (same condition as combat)
+        local stickers = require("stickers")
+        
+        -- Use exact same positioning as combat screen
+        local deck_bottom = 1906 + 406  -- deck_y + card_height = 2312
+        local item_area_width = 1200
+        local item_area_height = 300
+        local area_x = (screen_width - item_area_width) / 2
+        local area_y = deck_bottom + (screen_height - deck_bottom - item_area_height) / 2 + 60
+        
+        -- Draw area background for visibility in shop
+        love.graphics.setColor(0.2, 0.2, 0.3, 0.8)
+        love.graphics.rectangle("fill", area_x, area_y, item_area_width, item_area_height)
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.rectangle("line", area_x, area_y, item_area_width, item_area_height)
+        
+        -- Draw stickers or empty message
+        if state.owned_stickers and #state.owned_stickers > 0 then
+            local sticker_size = 200  -- 20px base * 10x scale
+            local sticker_spacing = 80
+            local max_stickers = 3
+            local stickers_to_show = math.min(#state.owned_stickers, max_stickers)
+            local total_width = stickers_to_show * sticker_size + (stickers_to_show - 1) * sticker_spacing
+            local start_x = area_x + (item_area_width - total_width) / 2
+            local start_y = area_y + (item_area_height - sticker_size) / 2
+            
+            for i = 1, stickers_to_show do
+                local sticker = state.owned_stickers[i]
+                local x = start_x + (i - 1) * (sticker_size + sticker_spacing)
+                local y = start_y
+                
+                love.graphics.setColor(1, 1, 1)
+                stickers.draw_sticker(sticker.id, x, y, 10.0)  -- 10x scale for item area
+                
+                -- Store bounds for drag detection (same as combat)
+                sticker._item_area_bounds = {x = x, y = y, width = sticker_size, height = sticker_size}
+            end
+        else
+            -- Show empty item area message
+            love.graphics.setFont(fonts.regular)
+            love.graphics.setColor(0.6, 0.6, 0.6)
+            local empty_text = "No pegatinas owned"
+            local text_width = fonts.regular:getWidth(empty_text)
+            local text_height = fonts.regular:getHeight()
+            love.graphics.print(empty_text, area_x + (item_area_width - text_width) / 2, area_y + (item_area_height - text_height) / 2)
+        end
     end
     
     -- Instructions
     love.graphics.setFont(fonts.regular)
     love.graphics.setColor(0.7, 0.7, 0.7)
-    local instructions = "↑↓ Navegar • ENTER/SPACE Comprar • ESC/Q Salir"
+    local instructions = "CLICK ITEM • PURCHASE BUTTON • REROLL BUTTON • ESC/Q Salir"
     local inst_width = fonts.regular:getWidth(instructions)
     love.graphics.print(instructions, (screen_width - inst_width) / 2, screen_height - 40)
     
@@ -1244,22 +1703,94 @@ function ui.draw_shop(state)
     end
 end
 
+function ui.draw_shop_buttons(state)
+    -- Use exact same button positions as combat screen (already set by ui.update_button_positions)
+    -- No need to recalculate positions - just draw at existing button coordinates
+    
+    -- Draw discard button (reroll shop) on the left
+    love.graphics.setColor(1, 1, 1)
+    local card = require("card")
+    local discard_sprite = card.get_discard_hand_sprite()
+    if discard_sprite then
+        love.graphics.draw(discard_sprite, buttons.discard.x, buttons.discard.y, 0, 10.0, 10.0)  -- 10x scale same as combat
+        
+        -- Add "REROLL" label below discard button
+        love.graphics.setFont(fonts.regular)
+        love.graphics.setColor(1, 1, 0)  -- Yellow text
+        local reroll_text = "REROLL (1p)"
+        local text_width = fonts.regular:getWidth(reroll_text)
+        love.graphics.print(reroll_text, buttons.discard.x + (ui.SPRITE_BUTTON_SIZE - text_width) / 2, buttons.discard.y + ui.SPRITE_BUTTON_SIZE + 10)
+        
+        -- Show affordability
+        if state.pesetas < 1 then
+            love.graphics.setColor(1, 0.5, 0.5)  -- Red if can't afford
+            love.graphics.print(reroll_text, buttons.discard.x + (ui.SPRITE_BUTTON_SIZE - text_width) / 2, buttons.discard.y + ui.SPRITE_BUTTON_SIZE + 10)
+        end
+    end
+    
+    -- Draw play button (confirm purchase) on the right
+    love.graphics.setColor(1, 1, 1)
+    local play_sprite = card.get_play_hand_sprite()
+    if play_sprite then
+        love.graphics.draw(play_sprite, buttons.play.x, buttons.play.y, 0, 10.0, 10.0)  -- 10x scale same as combat
+        
+        -- Add "PURCHASE" label below play button
+        love.graphics.setFont(fonts.regular)
+        love.graphics.setColor(0, 1, 0)  -- Green text
+        local purchase_text = "PURCHASE"
+        local text_width = fonts.regular:getWidth(purchase_text)
+        love.graphics.print(purchase_text, buttons.play.x + (ui.SPRITE_BUTTON_SIZE - text_width) / 2, buttons.play.y + ui.SPRITE_BUTTON_SIZE + 10)
+        
+        -- Show if no item is selected
+        if not state.selected_shop_item or state.selected_shop_item == 0 then
+            love.graphics.setColor(0.7, 0.7, 0.7)  -- Gray if no selection
+            love.graphics.print(purchase_text, buttons.play.x + (ui.SPRITE_BUTTON_SIZE - text_width) / 2, buttons.play.y + ui.SPRITE_BUTTON_SIZE + 10)
+        end
+    end
+    
+    -- Button positions are already set by ui.update_button_positions() - no need to modify
+end
+
 function ui.check_button_click(x, y, state)
     if state.game_over then
         return nil
     end
     
-    if x >= buttons.discard.x and x <= buttons.discard.x + buttons.discard.width and
-       y >= buttons.discard.y and y <= buttons.discard.y + buttons.discard.height and
-       state.discards_remaining > 0 then
-        return "discard"
+    -- Check if in card selection mode
+    if state.in_card_selection then
+        if x >= buttons.discard.x and x <= buttons.discard.x + buttons.discard.width and
+           y >= buttons.discard.y and y <= buttons.discard.y + buttons.discard.height then
+            return "card_selection_cancel"
+        end
+        
+        if x >= buttons.play.x and x <= buttons.play.x + buttons.play.width and
+           y >= buttons.play.y and y <= buttons.play.y + buttons.play.height then
+            return "card_selection_confirm"
+        end
+    -- Check if in shop mode
+    elseif state.in_shop then
+        if x >= buttons.discard.x and x <= buttons.discard.x + buttons.discard.width and
+           y >= buttons.discard.y and y <= buttons.discard.y + buttons.discard.height then
+            return "shop_reroll"
+        end
+        
+        if x >= buttons.play.x and x <= buttons.play.x + buttons.play.width and
+           y >= buttons.play.y and y <= buttons.play.y + buttons.play.height then
+            return "shop_purchase"
+        end
+    else
+        -- Combat mode button functionality
+        if x >= buttons.discard.x and x <= buttons.discard.x + buttons.discard.width and
+           y >= buttons.discard.y and y <= buttons.discard.y + buttons.discard.height and
+           state.discards_remaining > 0 then
+            return "discard"
+        end
+        
+        if x >= buttons.play.x and x <= buttons.play.x + buttons.play.width and
+           y >= buttons.play.y and y <= buttons.play.y + buttons.play.height then
+            return "play"
+        end
     end
-    
-    if x >= buttons.play.x and x <= buttons.play.x + buttons.play.width and
-       y >= buttons.play.y and y <= buttons.play.y + buttons.play.height then
-        return "play"
-    end
-    
     
     return nil
 end
@@ -1349,7 +1880,7 @@ function ui.get_amarraco_effect_subtitle(amarraco, hand, state)
     elseif amarraco.id == "reliquia" then
         local bonus = 0
         for _, game_card in ipairs(hand) do
-            if game_card.suit == "Oros" then
+            if game_card.suit == "Oros" or (game_card.attached_sticker == "arcoiris") then
                 local value = game_card.value > 10 and 10 or game_card.value
                 bonus = bonus + value
             end
@@ -1365,7 +1896,7 @@ function ui.get_amarraco_effect_subtitle(amarraco, hand, state)
     elseif amarraco.id == "posavasos" then
         local bonus = 0
         for _, game_card in ipairs(hand) do
-            if game_card.suit == "Copas" then
+            if game_card.suit == "Copas" or (game_card.attached_sticker == "arcoiris") then
                 local value = game_card.value > 10 and 10 or game_card.value
                 bonus = bonus + value
             end
@@ -1374,7 +1905,7 @@ function ui.get_amarraco_effect_subtitle(amarraco, hand, state)
     elseif amarraco.id == "afilar" then
         local bonus = 0
         for _, game_card in ipairs(hand) do
-            if game_card.suit == "Espadas" then
+            if game_card.suit == "Espadas" or (game_card.attached_sticker == "arcoiris") then
                 local value = game_card.value > 10 and 10 or game_card.value
                 bonus = bonus + value
             end
@@ -1383,7 +1914,7 @@ function ui.get_amarraco_effect_subtitle(amarraco, hand, state)
     elseif amarraco.id == "madera" then
         local bonus = 0
         for _, game_card in ipairs(hand) do
-            if game_card.suit == "Bastos" then
+            if game_card.suit == "Bastos" or (game_card.attached_sticker == "arcoiris") then
                 local value = game_card.value > 10 and 10 or game_card.value
                 bonus = bonus + value
             end
@@ -1469,7 +2000,7 @@ function ui.get_individual_amarraco_bonus(amarraco, hand, state)
         -- Oros cards pesetas bonus
         local bonus = 0
         for _, game_card in ipairs(hand) do
-            if game_card.suit == "Oros" then
+            if game_card.suit == "Oros" or (game_card.attached_sticker == "arcoiris") then
                 local value = game_card.value > 10 and 10 or game_card.value
                 bonus = bonus + value
             end
@@ -1487,7 +2018,7 @@ function ui.get_individual_amarraco_bonus(amarraco, hand, state)
         -- Copas cards HP bonus
         local bonus = 0
         for _, game_card in ipairs(hand) do
-            if game_card.suit == "Copas" then
+            if game_card.suit == "Copas" or (game_card.attached_sticker == "arcoiris") then
                 local value = game_card.value > 10 and 10 or game_card.value
                 bonus = bonus + value
             end
@@ -1497,7 +2028,7 @@ function ui.get_individual_amarraco_bonus(amarraco, hand, state)
         -- Espadas cards damage bonus
         local bonus = 0
         for _, game_card in ipairs(hand) do
-            if game_card.suit == "Espadas" then
+            if game_card.suit == "Espadas" or (game_card.attached_sticker == "arcoiris") then
                 local value = game_card.value > 10 and 10 or game_card.value
                 bonus = bonus + value
             end
@@ -1507,7 +2038,7 @@ function ui.get_individual_amarraco_bonus(amarraco, hand, state)
         -- Bastos cards defense bonus
         local bonus = 0
         for _, game_card in ipairs(hand) do
-            if game_card.suit == "Bastos" then
+            if game_card.suit == "Bastos" or (game_card.attached_sticker == "arcoiris") then
                 local value = game_card.value > 10 and 10 or game_card.value
                 bonus = bonus + value
             end
@@ -1545,6 +2076,180 @@ function ui.get_individual_amarraco_bonus(amarraco, hand, state)
     end
     
     return ""
+end
+
+-- Handle mouse press for sticker drag start
+function ui.handle_sticker_mouse_press(x, y, state)
+    -- Only handle when we have a hand (preview and combat phases)
+    if not (state.hand and #state.hand > 0) or not state.owned_stickers then
+        return false
+    end
+    
+    -- Check if click is on a sticker in the item area (only check visible stickers)
+    local max_stickers = 3
+    local stickers_to_check = math.min(#state.owned_stickers, max_stickers)
+    for i = 1, stickers_to_check do
+        local sticker = state.owned_stickers[i]
+        if sticker._item_area_bounds then
+            local bounds = sticker._item_area_bounds
+            if x >= bounds.x and x <= bounds.x + bounds.width and
+               y >= bounds.y and y <= bounds.y + bounds.height then
+                -- Start dragging this sticker (no offset needed since we center on cursor)
+                state.dragging_sticker = sticker
+                state.drag_offset_x = 0  -- No offset needed with centered positioning  
+                state.drag_offset_y = 0  -- No offset needed with centered positioning
+                return true
+            end
+        end
+    end
+    
+    return false
+end
+
+-- Handle mouse release for sticker drop
+function ui.handle_sticker_mouse_release(x, y, state)
+    if not state.dragging_sticker then
+        return false
+    end
+    
+    local stickers = require("stickers")
+    local card = require("card")
+    
+    -- Check if mouse is over a player card
+    if state.hand then
+        for _, game_card in ipairs(state.hand) do
+            if card.point_in_card(game_card, x, y) then
+                -- Try to attach sticker to this card
+                if stickers.can_attach_sticker(game_card) then
+                    -- Attach sticker permanently
+                    if stickers.attach_sticker_to_card(game_card, state.dragging_sticker.id) then
+                        -- Register attachment for persistence across rounds
+                        local game_state = require("game_state")
+                        game_state.register_sticker_attachment(game_card, state.dragging_sticker.id)
+                        
+                        -- Remove sticker from owned stickers (it's now attached to card)
+                        for i, owned_sticker in ipairs(state.owned_stickers) do
+                            if owned_sticker.id == state.dragging_sticker.id then
+                                table.remove(state.owned_stickers, i)
+                                break
+                            end
+                        end
+                        
+                        -- Clear drag state
+                        state.dragging_sticker = nil
+                        state.drag_offset_x = 0
+                        state.drag_offset_y = 0
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    
+    -- If we get here, drop was invalid - just clear drag state
+    state.dragging_sticker = nil
+    state.drag_offset_x = 0
+    state.drag_offset_y = 0
+    return false
+end
+
+-- MUS animation system for round starts
+local mus_animation = {
+    active = false,
+    timer = 0,
+    duration = 2.0,  -- Total animation time
+    round_number = 1,
+    bounce_scale = 1.0
+}
+
+-- Start MUS animation for new round
+function ui.start_mus_animation(round)
+    mus_animation.active = true
+    mus_animation.timer = 0
+    mus_animation.round_number = round
+    mus_animation.bounce_scale = 1.0
+end
+
+-- Skip MUS animation (called on click)
+function ui.skip_mus_animation()
+    if mus_animation.active then
+        mus_animation.active = false
+    end
+end
+
+-- Check if MUS animation is active
+function ui.is_mus_animation_active()
+    return mus_animation.active
+end
+
+-- Update MUS animation
+function ui.update_mus_animation(dt)
+    if mus_animation.active then
+        mus_animation.timer = mus_animation.timer + dt
+        
+        -- Create bouncy effect using sine wave
+        local bounce_frequency = 8  -- How fast it bounces
+        local bounce_amplitude = 0.2  -- How much it bounces
+        mus_animation.bounce_scale = 1.0 + math.sin(mus_animation.timer * bounce_frequency) * bounce_amplitude
+        
+        -- End animation after duration
+        if mus_animation.timer >= mus_animation.duration then
+            mus_animation.active = false
+        end
+    end
+end
+
+-- Draw MUS animation
+function ui.draw_mus_animation()
+    if not mus_animation.active then
+        return
+    end
+    
+    local screen_width, screen_height = ui.get_screen_dimensions()
+    
+    -- Draw semi-transparent dark overlay
+    love.graphics.setColor(0, 0, 0, 0.7)
+    love.graphics.rectangle("fill", 0, 0, screen_width, screen_height)
+    
+    -- Draw bouncy "¡MUS!" text in center
+    love.graphics.setFont(fonts.pixel_big)
+    love.graphics.setColor(1, 1, 1)  -- White text
+    local mus_text = "¡MUS!"
+    local mus_width = fonts.pixel_big:getWidth(mus_text)
+    local mus_height = fonts.pixel_big:getHeight()
+    
+    -- Apply bounce scaling and center
+    love.graphics.push()
+    love.graphics.translate(screen_width / 2, screen_height / 2 - 100)
+    love.graphics.scale(mus_animation.bounce_scale, mus_animation.bounce_scale)
+    love.graphics.print(mus_text, -mus_width / 2, -mus_height / 2)
+    love.graphics.pop()
+    
+    -- Draw "RONDA X" text below (stays for full duration)
+    love.graphics.setFont(fonts.regular)
+    love.graphics.setColor(0.8, 0.8, 0.8)  -- Light gray
+    local ronda_text = string.format("RONDA %d", mus_animation.round_number)
+    local ronda_width = fonts.regular:getWidth(ronda_text)
+    love.graphics.print(ronda_text, (screen_width - ronda_width) / 2, screen_height / 2 + 50)
+end
+
+-- Draw dragging sticker on top of all other elements
+function ui.draw_dragging_sticker(state)
+    if state.dragging_sticker then
+        local stickers = require("stickers")
+        local canvas = require("canvas")
+        local mouse_x, mouse_y = love.mouse.getPosition()
+        local internal_x, internal_y = canvas.transform_mouse_position(mouse_x, mouse_y)
+        
+        -- Draw sticker at mouse position centered on cursor
+        love.graphics.setColor(1, 1, 1, 0.9)  -- Slightly more opaque for better visibility
+        local drag_scale = 10.0  -- Same scale as item area for consistency
+        local sticker_size = 20 * drag_scale  -- 200px at 10x scale
+        stickers.draw_sticker(state.dragging_sticker.id, 
+                             internal_x - sticker_size/2,  -- Center on mouse cursor
+                             internal_y - sticker_size/2,  -- Center on mouse cursor
+                             drag_scale)
+    end
 end
 
 return ui

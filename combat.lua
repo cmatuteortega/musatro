@@ -58,18 +58,65 @@ function combat.start_combat(player_hand, ai_hand, player_bonuses, owned_amarrac
     -- Apply Pokemon abilities effects to player's breakdown
     local pokemon_effects = pokemon_abilities.apply_effects(combat_state.player_breakdown, player_hand, ai_hand, game_state)
     
+    -- Apply sticker effects to player's breakdown
+    local stickers = require("stickers")
+    local sticker_effects = {
+        damage_bonus = 0,
+        multiplier_bonus = 1
+    }
+    
+    -- Calculate sticker bonuses for each card
+    for _, card in ipairs(player_hand) do
+        if card.attached_sticker then
+            -- Check if this card is the "grande" or "pequeña"
+            local is_grande = (card.value == combat_state.player_breakdown.grandes)
+            local is_pequena = (card.value == combat_state.player_breakdown.pequenas)
+            local card_effects = stickers.apply_card_sticker_effects(card, is_grande, is_pequena)
+            sticker_effects.damage_bonus = sticker_effects.damage_bonus + card_effects.damage_bonus
+            sticker_effects.multiplier_bonus = sticker_effects.multiplier_bonus + card_effects.multiplier_bonus
+            
+            -- Debug info for sticker effects (store in combat state for UI display)
+            if not combat_state.sticker_debug then
+                combat_state.sticker_debug = {}
+            end
+            
+            local sticker = stickers.get_sticker_by_id(card.attached_sticker)
+            table.insert(combat_state.sticker_debug, {
+                card_value = card.value,
+                sticker_name = sticker and sticker.name or "Unknown",
+                is_grande = is_grande,
+                is_pequena = is_pequena,
+                damage_bonus = card_effects.damage_bonus,
+                multiplier_bonus = card_effects.multiplier_bonus,
+                pequenas_value = combat_state.player_breakdown.pequenas,
+                grandes_value = combat_state.player_breakdown.grandes
+            })
+        end
+    end
+    
     -- Store effects for scoring animation
     combat_state.amarracos_effects = amarracos_effects
     combat_state.owned_amarracos = owned_amarracos
     combat_state.pokemon_effects = pokemon_effects
+    combat_state.sticker_effects = sticker_effects
     
     -- Update breakdown with amarracos and Pokemon effects - proper order: sum first, then multiply, perfect juego last
     
-    -- 1. Add damage bonus to base damage (grandes) before multipliers (both amarracos and Pokemon)
-    combat_state.player_breakdown.grandes = combat_state.player_breakdown.grandes + amarracos_effects.damage_bonus + pokemon_effects.damage_bonus
+    -- 1. Add damage bonus to base damage (grandes) before multipliers (amarracos, Pokemon, and stickers)
+    local original_grandes = combat_state.player_breakdown.grandes
+    combat_state.player_breakdown.grandes = combat_state.player_breakdown.grandes + amarracos_effects.damage_bonus + pokemon_effects.damage_bonus + sticker_effects.damage_bonus
     
-    -- 2. Apply multiplier bonuses to the base multiplier (both amarracos and Pokemon)
-    local base_multiplier = combat_state.player_breakdown.multiplier * amarracos_effects.multiplier_bonus * pokemon_effects.multiplier_bonus
+    -- Debug: Store damage bonus breakdown
+    combat_state.damage_debug = {
+        original_grandes = original_grandes,
+        amarracos_bonus = amarracos_effects.damage_bonus,
+        pokemon_bonus = pokemon_effects.damage_bonus,
+        sticker_bonus = sticker_effects.damage_bonus,
+        final_grandes = combat_state.player_breakdown.grandes
+    }
+    
+    -- 2. Apply multiplier bonuses to the base multiplier (amarracos, Pokemon, and stickers)
+    local base_multiplier = combat_state.player_breakdown.multiplier * amarracos_effects.multiplier_bonus * pokemon_effects.multiplier_bonus * sticker_effects.multiplier_bonus
     
     -- 3. Apply perfect juego multiplier (if not disabled and applicable)
     local final_multiplier = base_multiplier
@@ -365,6 +412,11 @@ end
 -- Get scoring animation completion callback
 function combat.get_scoring_callback()
     return on_scoring_animation_complete
+end
+
+-- Get sticker debug info (for UI display)
+function combat.get_sticker_debug()
+    return combat_state.sticker_debug or {}
 end
 
 return combat

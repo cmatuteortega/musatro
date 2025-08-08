@@ -6,13 +6,49 @@ local scoring = {}
 -- Calculate juego (sum with face cards worth 10)
 function scoring.calculate_juego(hand)
     local sum = 0
+    local debug_info = {}  -- For tracking calculation
+    
     for _, game_card in ipairs(hand) do
-        if game_card.value > 10 then
-            sum = sum + 10  -- Sota, Caballo, Rey = 10
-        else
+        local card_contribution = game_card.value
+        local is_smiley = false
+        
+        -- Check if card has smiley sticker (counts as 10)
+        if game_card.attached_sticker then
+            local stickers = require("stickers")
+            local sticker = stickers.get_sticker_by_id(game_card.attached_sticker)
+            if sticker and sticker.effect_type == "face_card_juego" then
+                card_contribution = 10  -- Smiley sticker: card counts as 10
+                is_smiley = true
+                sum = sum + 10
+            elseif game_card.value > 10 then
+                card_contribution = 10  -- Regular face cards: Sota, Caballo, Rey = 10
+                sum = sum + 10
+            else
+                sum = sum + game_card.value  -- Regular cards: use actual value
+            end
+        elseif game_card.value > 10 then
+            card_contribution = 10  -- Sota, Caballo, Rey = 10
+            sum = sum + 10
+        else 
             sum = sum + game_card.value
         end
+        
+        -- Store debug info
+        table.insert(debug_info, {
+            original_value = game_card.value,
+            contribution = card_contribution,
+            is_smiley = is_smiley,
+            has_sticker = game_card.attached_sticker ~= nil
+        })
     end
+    
+    -- Store debug info globally for access (temporary debugging)
+    _G.juego_debug = {
+        total = sum,
+        cards = debug_info,
+        calculation_time = os.time()
+    }
+    
     return sum
 end
 
