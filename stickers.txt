@@ -1,0 +1,5 @@
+- Smiley: the card you attach this sticker to counts as a face card (11,12,13) in juego calculations (+10)
+- Arcoiris: the card you attach this sticker to recieves the 4 suits: oros, espadas, bastos and copas
+- Tribal: the card you attach this sticker to sums +2 mult if it scores in pequeña (lowest card in hand)
+- Grefusa: the card you attach this sticker to sums +10 damage if it scores in grande (highest card in hand)
+- Heart: the card you attach this sticker replenishes player HP if scores in grande (highest card in hand)

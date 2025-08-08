@@ -29,6 +29,7 @@ This is a Spanish deck card game built with LÖVE2D (Love2D) framework in Lua, i
 ├── transition.lua       # Screen transitions and fade effects
 ├── menu.lua             # Menu state management (victory, shop, card selection)
 ├── shop.lua             # Card purchase system and pesetas economy
+├── stickers.lua         # Sticker (Pegatinas) system with permanent card attachments
 ├── pokemon_abilities.lua # Pokemon card effects system with 40+ unique abilities
 ├── poke_abilities.rtf   # Spanish specifications for Pokemon abilities (source of truth)
 ├── canvas.lua           # High-resolution canvas system with iPhone scaling (1656x2944 internal, 414x736 window)
@@ -63,6 +64,17 @@ The game uses a modular architecture with separate concerns:
 - **Input Handling**: `select_card_by_index()`, `select_card_by_position()` - Card selection via keyboard/mouse
 - **Shop Integration**: Purchase flow for regular cards and Liga cards
 - **AI Hand Persistence**: Shows AI's final hand face-up when player is defeated
+- **Sticker Persistence**: `sticker_registry` system maintains sticker attachments across rounds and deck recreations
+
+### stickers.lua
+- **Sticker Definitions**: `STICKERS` table with id, name, description, cost, effect_type, and color
+- **Shop Integration**: `get_shop_stickers()` provides 3 random stickers per shop visit (1 peseta each)
+- **Visual Rendering**: `draw_sticker()` creates placeholder squares with colored backgrounds and letters
+- **Attachment System**: `attach_sticker_to_card()`, `can_attach_sticker()` - One sticker per card maximum
+- **Combat Effects**: `apply_card_sticker_effects()` calculates damage bonuses during combat (red sticker: +5 damage if card is Grande)
+- **Card Integration**: `draw_card_sticker()` renders attached stickers in top-right corner of cards
+- **Persistence Architecture**: Works with game_state registry system for permanent attachment across rounds
+- **Effect Types**: Extensible system supports multiple sticker effects (currently "grande_damage_bonus")
 
 ### ui.lua
 - **Interface Rendering**: `draw_title_and_scores()`, `draw_hand()`, `draw_buttons()`, `draw_shop()`, `draw_amarracos()`
@@ -71,6 +83,9 @@ The game uses a modular architecture with separate concerns:
 - **Layout Management**: `update_button_positions()` - Responsive button placement with proper spacing
 - **Pixel-Perfect Scaling**: Amarracos display at 45px (1x) in-game, 90px (2x) in shop
 - **Horizontal Layouts**: Amarracos display horizontally above AI cards with effect subtitles
+- **Sticker Item Area**: Bottom-right corner displays owned stickers during preview and combat phases
+- **Drag-and-Drop System**: `handle_sticker_mouse_press()`, `handle_sticker_mouse_release()` - Full mouse interaction for sticker attachment
+- **Shop Stickers**: Purple "PEGATINAS" section in shop with 3 purchasable stickers per visit
 - **Combat Animation Colors**: Dark color scheme for better visibility over UI sprites
 
 ### scoring.lua
@@ -108,6 +123,50 @@ The game uses a modular architecture with separate concerns:
 - **Combat Integration**: Effects calculated during combat setup and applied to scoring breakdown
 - **Post-Victory Effects**: `apply_post_victory_effects()` handles healing and round-end abilities
 - **Ability Storage**: Pokemon abilities embedded in card objects with `effect_type` and descriptive text
+
+## Stickers System (Pegatinas)
+
+The sticker system allows players to permanently modify cards with attachable effects that persist across all future rounds.
+
+### **Core Mechanics**
+- **Purchase Cost**: 1 peseta per sticker (affordable for strategic choices)
+- **Shop Availability**: 3 random stickers per shop visit
+- **Attachment Limit**: One sticker per card maximum
+- **Permanence**: Stickers remain attached to specific cards across all future draws
+- **Consumable**: Stickers are removed from inventory when attached to cards
+
+### **User Interface**
+- **Item Area**: Bottom-right corner displays owned stickers during preview and combat phases
+- **Drag-and-Drop**: Click and drag stickers from item area onto cards
+- **Visual Integration**: Attached stickers appear in top-right corner of cards (20px scaled)
+- **Shop Section**: Purple "PEGATINAS" section with colored placeholder squares
+
+### **Persistence Architecture**
+```lua
+-- Sticker registry system maintains attachments across rounds
+sticker_registry = {
+    ["regular_7_Oros"] = "red_sticker",     -- Spanish cards
+    ["liga_1_barca"] = "red_sticker",       -- Liga cards  
+    ["pokemon_7_Jirachi"] = "red_sticker"   -- Pokemon cards
+}
+```
+
+### **Current Sticker Types**
+- **Red Sticker (Pegatina Roja)**: +5 damage bonus when attached card is "Grande" in combat
+- **Effect Integration**: Processed during combat calculation alongside amarracos and Pokemon effects
+- **Extensible Design**: System supports additional sticker types with different effect_type values
+
+### **Technical Implementation**
+- **Card Identity Keys**: Unique strings identify cards across deck recreations (`get_card_key()`)
+- **Registry Functions**: `register_sticker_attachment()`, `restore_sticker_attachments()`
+- **Deck Integration**: All deck creation and card drawing functions restore sticker attachments
+- **Combat Integration**: Sticker effects calculated in combat.lua damage bonus system
+
+### **Strategic Gameplay**
+- **Permanent Investment**: Stickers provide lasting value throughout entire run
+- **Card Selection**: Players must choose which cards deserve sticker enhancement
+- **Economic Balance**: 1 peseta cost creates meaningful but accessible strategic choices
+- **Visual Feedback**: Players always see their sticker investments on cards
 
 ## Shop System Architecture
 
@@ -293,14 +352,14 @@ The game uses a strategically arranged layout on the 4x scaled canvas (1656x2944
 1. **Top-Left Corner**: Round counter (y=80) and Player/AI HP bars (y=280-730)
 2. **Top-Right Corner**: Combat formula (y=80) and shield display (y=180) - indented from right edge
 3. **Center Vertical Area**: 
-   - **AI Cards**: y=900 (upper center area, face-down until revealed, then face-up)
-   - **Amarracos Display**: y=1100 (horizontal layout, 5x scaled sprites)
-   - **Player Cards**: y=1450 (below AI cards with extra separation, interactive selection with pop-out effect)
+   - **AI Cards**: y=850 (moved up 50px from 900, better centered between amarracos and deck, face-down until revealed, then face-up)
+   - **Amarracos Display**: y=500 (horizontal layout, 4x scaled sprites)
+   - **Player Cards**: y=1350 (moved up 50px from 1400, better centered between amarracos and deck, interactive selection with pop-out effect)
 4. **Bottom Area**: y=2600 (deck centered, play/discard buttons on sides)
 
 ### Critical Position Management
 - All card positions must use `ui.get_hand_y_position()` instead of hardcoded values
-- AI cards positioned at consistent y=900 across all game states
+- AI cards positioned at consistent y=850 across all game states
 - Proper spacing maintained between UI sections with 4x scaled gaps
 
 ## Font Management
@@ -347,6 +406,15 @@ Font consistency is maintained by explicitly setting `love.graphics.setFont()` b
 - **Scaling Logic**: Uses `clicked_amarraco` state tracking with integer positioning (`math.floor()` required)
 - **Shop vs Combat**: Shop amarracos maintain fixed 2x scale, combat amarracos use dynamic 1x/2x scaling
 - **Sprite Bounds**: All interactive sprites must store `_sprite_bounds` for accurate click detection
+
+### Stickers System Implementation
+- **Persistence Registry**: `sticker_registry` in game_state tracks attachments by unique card keys
+- **Card Identity**: Uses `get_card_key(game_card)` to generate unique identifiers across card types
+- **Restoration Points**: All deck creation, card drawing, and animation completion points must call `restore_sticker_attachments()`
+- **Registration Requirement**: Every sticker attachment must call `register_sticker_attachment()` for persistence
+- **Drag-and-Drop Integration**: Mouse handling must transform coordinates via canvas system
+- **Combat Integration**: Sticker effects calculated in combat.lua alongside amarracos and Pokemon effects
+- **Visual Rendering**: Attached stickers drawn in `card.draw_card()` using `stickers.draw_card_sticker()`
 
 ### Canvas System Architecture
 - **Coordinate Transformation**: All mouse input must be transformed via `canvas.transform_mouse_position(x, y)`

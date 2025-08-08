@@ -1,0 +1,340 @@
+====================================================================
+                    MUSATRO GAME - COMPREHENSIVE SUMMARY
+====================================================================
+
+GAME OVERVIEW
+=============
+Musatro is a Spanish deck card game built with LÖVE2D (Love2D) framework in Lua, 
+inspired by Balatro. It features turn-based combat against an AI opponent using 
+traditional Spanish deck mechanics with 40 cards (4 suits: Oros, Copas, Espadas, 
+Bastos with values 1-7, 11-Sota, 12-Caballo, 13-Rey). Players battle through 
+progressive rounds with RPG-style HP systems, card purchases, and a shop between rounds.
+
+CORE GAME MECHANICS
+===================
+
+1. SPANISH DECK SYSTEM
+   - 40 cards total: 4 suits × 10 cards each
+   - Card values: 1-7, 11 (Sota), 12 (Caballo), 13 (Rey)
+   - Suit colors: Oros (gold), Copas (red), Espadas (blue), Bastos (green)
+   - Face cards (Sota/Caballo/Rey) count as 10 points for scoring
+
+2. ROUND STRUCTURE
+   - Each round has exponential scoring targets (starts at 50, multiplied by 1.5)
+   - Players get 3 hands per round to reach the target score
+   - 4 cards dealt per hand
+   - Game ends if deck has insufficient cards (<4) or target not reached
+
+3. HAND MECHANICS
+   - Select cards by clicking or using number keys (1-4)
+   - A key = select all, D = discard, P = play, R = restart
+   - Selected cards "pop out" with visual offset upward
+   - Can discard unwanted cards (limited discards per round)
+
+4. PROGRESSION SYSTEM
+   - Purchase regular Spanish cards (8 pesetas) and Liga cards (12 pesetas)
+   - Acquire up to 5 Amarracos (game-modifying artifacts, 1 peseta each)
+   - Purchased cards permanently added to 40-card base deck
+   - Pesetas earned through victories and special effects
+
+SCORING SYSTEM (SPANISH CARD GAME)
+==================================
+
+The game uses traditional Spanish card scoring with 4 main categories:
+
+1. JUEGO (Sum)
+   - Sum of all card values in hand
+   - Face cards (11, 12, 13) count as 10 points
+   - Displayed prominently in UI
+   - Used for accuracy calculation: (juego/31) × 100%
+   - Perfect Juego = exactly 31 points (triggers special effects)
+
+2. GRANDES (Highest Card)
+   - Highest individual card value in hand
+   - Forms base damage for combat
+   - Directly affects attack power
+
+3. PEQUEÑAS (Lowest Card)  
+   - Lowest individual card value in hand
+   - Used for defense calculation: defense = 10 - pequeñas
+   - Lower cards provide better defense
+
+4. PARES (Pairs/Multiples)
+   - Provides damage multipliers based on matching values:
+     * No pairs = ×1 multiplier
+     * One pair = ×2 multiplier  
+     * Two pairs = ×4 multiplier
+     * Three of a kind = ×3 multiplier
+     * Four of a kind = ×5 multiplier
+
+COMBAT LOGIC CALCULATION
+========================
+
+Combat follows a precise step-by-step calculation process:
+
+PHASE 1: BASE SCORING CALCULATION
+----------------------------------
+1. Calculate player's base scoring breakdown:
+   - Juego = sum of card values (face cards = 10)
+   - Grandes = highest card value
+   - Pequeñas = lowest card value  
+   - Pares = multiplier based on matching values
+   - Base damage = grandes × pares multiplier
+   - Base defense = 10 - pequeñas
+   - Base accuracy = (juego/31) × 100%
+
+2. Calculate AI's scoring breakdown (same process)
+
+PHASE 2: AMARRACOS EFFECTS APPLICATION
+--------------------------------------
+Amarracos effects are applied in a specific order:
+
+Step 1: Card Value Modifications
+- Bola Billar: All 7s become 10s (affects hand before other calculations)
+
+Step 2: Additive Bonuses (applied to base values)
+- Damage bonuses: Token, Boton, Hebilla, Afilar, suit-based effects
+- Defense bonuses: Madera (Bastos cards add defense)
+- Other bonuses: HP (Posavasos), Pesetas (Reliquia)
+
+Step 3: Pin Effect (if present)
+- Converts ALL defense (base + bonuses) to damage
+- Sets final defense to 0
+
+Step 4: Multiplicative Effects
+- Win condition multipliers (×2 if player wins specific categories)
+- Canica: ×3 if hand contains all 4 suits
+- Applied after all additive effects
+
+Step 5: Special Overrides
+- Tenis: Sets accuracy to 100%, disables Perfect Juego ×3 multiplier
+
+PHASE 3: POKEMON ABILITIES APPLICATION
+--------------------------------------
+Pokemon abilities add another layer of effects:
+
+- Flat damage bonuses (e.g., Moltres +10 damage)
+- Conditional multipliers (e.g., Combee +1 mult per low card)
+- Special mechanics (e.g., Staryu minimum damage, Cinccino damage reduction)
+- Accuracy overrides and defensive abilities
+
+PHASE 4: PERFECT JUEGO MULTIPLIER
+---------------------------------
+- If juego = exactly 31 AND not disabled by Tenis amarraco:
+  * Final damage = damage × 3
+  * Special visual effects and messaging triggered
+
+PHASE 5: HIT/MISS DETERMINATION
+-------------------------------
+- Player hit chance = player accuracy %
+- AI hit chance = AI accuracy %
+- Random roll (0-100) determines if attacks hit
+- Only successful hits deal damage
+
+PHASE 6: FINAL DAMAGE CALCULATION
+---------------------------------
+- Player final damage = player damage (if hit) - 0 (AI has no defense)
+- AI final damage = AI damage (if hit) - player defense
+- Damage cannot go below 0
+
+COMBAT PHASES SYSTEM
+====================
+
+Combat uses a phased animation system with precise timing:
+
+1. AI_REVEAL (0.6s): AI cards flip face-up
+2. DAMAGE_DISPLAY (0.6s): Show calculated damage values
+3. SCORING_ANIMATION (variable): Animated breakdown of scoring calculations
+4. PLAYER_ATTACK (0.6s): Player attack animation and hit/miss result
+5. AI_DEFEAT_CHECK (0.6s): Check if AI is defeated by damage
+6. AI_ATTACK (0.6s): AI attack animation and hit/miss result  
+7. PLAYER_DEFEAT_CHECK (0.6s): Check if player is defeated by damage
+8. COMPLETE: Combat finished, return to main game
+
+Each phase provides specific visual feedback and updates game state accordingly.
+
+ASSET ORGANIZATION
+==================
+
+SPRITE STRUCTURE:
+/sprites/
+├── Card sprites: {value}_{suit}.png (45×58px, scaled 7x = 315×406px)
+├── back.png (standard card back)
+├── amarracos/ (45×45px sprites, scaled 5x = 225px in-game, 10x = 450px in shop)
+│   ├── euro.png, dos_euro.png, tres_euro.png (economy)
+│   ├── pin.png, token.png, colgante_perro.png (combat modifiers)
+│   ├── boton.png, hebilla.png (card type bonuses)
+│   ├── reliquia.png, posavasos.png, afilar.png, madera.png (suit bonuses)
+│   └── Various multiplier amarracos (single_peseta.png, etc.)
+├── liga/ (Liga team cards, all value 1 Aces)
+│   ├── 1_{team}.png for 12 teams (Athletic, Atleti, Barca, etc.)
+│   └── back.png (Liga card back)
+├── poke/ (Pokemon cards with abilities)
+│   ├── {value}_{pokemon}.png (e.g., 5_Staryu.png)
+│   └── back.png (Pokemon card back)
+└── ui/ (Interface elements, 33×33px scaled 4x = 132px)
+    ├── deck.png, play_hand.png, discard_hand.png
+    └── Button sprites for player actions
+
+TECHNICAL ARCHITECTURE
+
+CANVAS SYSTEM:
+- Internal resolution: 1656×2944 (iPhone aspect ratio, 4x scaling)
+- Window size: 414×736 (fixed iPhone dimensions)
+- All sprites use pixel-perfect "nearest" filtering
+- Canvas system transforms mouse coordinates for accurate input
+
+UI LAYOUT (on 4x scaled canvas):
+- Top-left: Round counter (y=80), HP bars (y=280-730)
+- Top-right: Combat formula (y=80), shield display (y=180)
+- Center: AI cards (y=900), Amarracos (y=1100), Player cards (y=1450)
+- Bottom: Deck and action buttons (y=2600)
+
+FONTS:
+- Minecraft.ttf in three sizes: 56px, 72px, 96px (4x scaled for canvas)
+- Explicit font setting before each text render to prevent conflicts
+
+AMARRACOS SYSTEM (20 UNIQUE ITEMS)
+==================================
+
+ECONOMY AMARRACOS:
+- Euro: +5 pesetas per round survived
+- Dos Euro: ×2 pesetas multiplier for all peseta gains
+- Tres Euro: 20% shop discount on all purchases
+
+COMBAT MODIFIERS:
+- Pin: Converts all defense to damage, sets defense to 0
+- Token: Lower accuracy provides more damage (inverse relationship)
+- Colgante Perro: No discards allowed, but double hands per round
+
+CARD TYPE BONUSES:
+- Boton: +1 damage per even-valued card (2,4,6,8,10,12)
+- Hebilla: +1 damage per odd-valued card (1,3,5,7,11)
+
+SUIT-BASED EFFECTS:
+- Reliquia: Oros cards → pesetas (card value added to pesetas)
+- Posavasos: Copas cards → HP restoration
+- Afilar: Espadas cards → damage bonus
+- Madera: Bastos cards → defense bonus
+
+WIN CONDITION MULTIPLIERS:
+- Single Peseta: ×2 multiplier if win pequeñas category
+- 100 Pesetas: ×2 multiplier if win grandes category  
+- Duro: ×2 multiplier if win pares category
+- 25 Pesetas: ×2 multiplier if win juego category
+
+SPECIAL MECHANICS:
+- Bola Billar: All 7s count as 10 points (affects juego calculation)
+- Tenis: Perfect 100% accuracy, disables Perfect Juego ×3 multiplier
+- Canica: ×3 multiplier if hand contains all 4 suits
+- Chapa: Add juego value to damage if win juego category
+
+SHOP SYSTEM
+===========
+
+CARD PURCHASES:
+- Regular Cards: Pick 1 from 3 random Spanish cards (8 pesetas)
+- Liga Cards: Pick 1 from 3 random team cards (12 pesetas)
+- Pokemon Cards: Alternative card type with unique abilities
+
+AMARRACOS SHOP:
+- 3 random available amarracos offered per shop visit
+- 1 peseta each (affected by Tres Euro discount)
+- Maximum 5 amarracos can be owned
+- Cannot repurchase owned amarracos
+
+LIGA CARD SYSTEM:
+- 12 team cards: Athletic, Atleti, Barca, Betis, Espanyol, Madrid, 
+  Racing, Real, R.Sociedad, Sevilla, Valencia, Zaragoza
+- All Liga cards are Aces (value = 1, suit = "Liga")
+- Use team-specific sprites from /sprites/liga/1_{team}.png
+
+POKEMON ABILITIES SYSTEM
+========================
+
+40+ unique Pokemon with distinct abilities categorized by effect types:
+
+DAMAGE EFFECTS:
+- Flat damage bonuses (Moltres: +10 damage)
+- Conditional damage (Combee: +1 mult per low card)
+- Minimum damage guarantees (Staryu: minimum 5 damage)
+
+DEFENSIVE EFFECTS:
+- Damage reduction (Cinccino: reduces enemy damage)
+- HP restoration abilities
+- Shield generation effects
+
+ACCURACY EFFECTS:
+- Accuracy overrides and modifications
+- Hit guarantee abilities
+- Miss chance reductions
+
+ECONOMIC EFFECTS:
+- Peseta generation abilities
+- Cost reduction effects
+- Resource manipulation
+
+AI OPPONENT SYSTEM
+==================
+
+"CUÑAO" PERSONALITY:
+- Spanish-themed AI with contextual phrases
+- Victory/defeat/playing/discarding dialogue
+- Boastful when winning, frustrated when losing
+
+STRATEGIC BEHAVIOR:
+- Prioritizes keeping pairs and high-value cards
+- Smart discarding: removes low singles while maintaining hand strength
+- Difficulty scaling: HP and damage multipliers increase each round
+
+AI HAND MECHANICS:
+- Uses completely independent deck from player
+- Cards remain face-down until combat reveal phase
+- After player defeat, AI hand stays face-up for analysis
+
+GAME STATES AND FLOW
+====================
+
+MAIN GAME LOOP:
+1. Deal 4 cards to player
+2. Player selects cards to play/discard
+3. Combat phase with AI
+4. Victory/defeat/survival determination
+5. Shop phase (if survived)
+6. Next round or game over
+
+WIN CONDITIONS:
+- Defeat AI: Player survives, AI HP reaches 0
+- Round survival: Complete 3 hands, reach score target
+- Progressive difficulty: Each round increases target and AI strength
+
+LOSS CONDITIONS:
+- Player HP reaches 0
+- Unable to reach score target within 3 hands
+- Deck exhaustion (less than 4 cards remaining)
+
+TECHNICAL NOTES
+===============
+
+RANDOM GENERATION:
+- Single seed set at startup: math.randomseed(os.time())
+- No reseeding during gameplay to ensure fair randomization
+- Player and AI use completely separate deck instances
+
+ANIMATION FRAMEWORK:
+- Smooth card movements with easing functions
+- 60fps target with delta time interpolation
+- Animation queuing system with callbacks
+- State synchronization between UI and animations
+
+PERFORMANCE:
+- Pixel-perfect sprite scaling with integer ratios
+- Linear filtering for smooth canvas scaling
+- Efficient sprite caching and management
+- Optimized rendering pipeline
+
+This comprehensive summary covers all major systems, mechanics, and technical 
+details of the Musatro game. The combat calculation follows a precise order 
+of operations ensuring consistent and predictable gameplay while providing 
+deep strategic complexity through the interaction of cards, amarracos, and 
+Pokemon abilities.

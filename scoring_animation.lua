@@ -103,7 +103,7 @@ local function get_amarraco_sprite_position(index)
     local canvas = require("canvas")
     local screen_width, _ = canvas.get_internal_dimensions()  -- Use canvas dimensions
     local base_sprite_size = 45
-    local display_scale = 5.0  -- Match current combat display scale (5x)
+    local display_scale = 4.0  -- Match current combat display scale (4x)
     local final_sprite_size = base_sprite_size * display_scale
     local sprite_spacing = 15  -- Match current combat spacing
     local total_width = #animation_state.owned_amarracos * final_sprite_size + (#animation_state.owned_amarracos - 1) * sprite_spacing

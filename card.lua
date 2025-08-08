@@ -189,7 +189,8 @@ function card.create(value, suit)
         selected = false,
         x = 0,
         y = 0,
-        card_type = "regular"
+        card_type = "regular",
+        attached_sticker = nil  -- For sticker attachment
     }
 end
 
@@ -203,7 +204,8 @@ function card.create_liga(team)
         x = 0,
         y = 0,
         card_type = "liga",
-        team = team  -- Store team name for sprite lookup
+        team = team,  -- Store team name for sprite lookup
+        attached_sticker = nil  -- For sticker attachment
     }
 end
 
@@ -497,7 +499,8 @@ function card.create_pokemon(value, pokemon)
         y = 0,
         card_type = "pokemon",
         pokemon = pokemon,  -- Store pokemon name for sprite lookup
-        ability = ability_data  -- Store complete ability information
+        ability = ability_data,  -- Store complete ability information
+        attached_sticker = nil  -- For sticker attachment
     }
 end
 
@@ -599,8 +602,9 @@ function card.get_card_name(game_card)
             [13] = "Rey"
         }
         
-        local value_name = value_names[game_card.value] or tostring(game_card.value)
-        return value_name .. " de " .. game_card.suit
+        local value_name = value_names[game_card.value] or tostring(game_card.value or "?")
+        local suit_name = game_card.suit or "Unknown"
+        return value_name .. " de " .. suit_name
     end
 end
 
@@ -676,6 +680,10 @@ function card.draw_card(game_card, font)
             love.graphics.setColor(1, 1, 0, 0.3) -- Yellow highlight with transparency
             love.graphics.rectangle("fill", x, y, card.CARD_WIDTH, card.CARD_HEIGHT)
         end
+        
+        -- Draw attached sticker if present
+        local stickers = require("stickers")
+        stickers.draw_card_sticker(game_card, x, y, 7.0)  -- Use same scale as card
     else
         -- Fallback to original drawing method if sprite not available
         -- Card background
@@ -717,6 +725,10 @@ function card.draw_card(game_card, font)
         local points = tostring(game_card.value) .. "pt"
         local points_width = font:getWidth(points)
         love.graphics.print(points, x + card.CARD_WIDTH - points_width - 5, y + 20)
+        
+        -- Draw attached sticker if present (fallback method)
+        local stickers = require("stickers")
+        stickers.draw_card_sticker(game_card, x, y, 1.0)  -- Use 1.0 scale for fallback method
     end
 end
 

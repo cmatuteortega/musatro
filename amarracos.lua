@@ -261,6 +261,16 @@ function amarracos.get_shop_prizes(owned_prizes)
     return shop_prizes
 end
 
+-- Helper function to check if a card has all suits (via arcoiris sticker)
+local function card_has_all_suits(card)
+    return card.attached_sticker == "arcoiris"
+end
+
+-- Helper function to check if a card matches a specific suit (considering arcoiris sticker)
+local function card_matches_suit(card, target_suit)
+    return card.suit == target_suit or card_has_all_suits(card)
+end
+
 -- Helper function to compare hands for amarraco win conditions
 local function compare_hands_for_amarracos(player_breakdown, ai_breakdown, player_hand)
     local results = {
@@ -271,10 +281,18 @@ local function compare_hands_for_amarracos(player_breakdown, ai_breakdown, playe
         has_all_suits = false
     }
     
-    -- Check if player has all 4 suits
+    -- Check if player has all 4 suits (including arcoiris sticker effects)
     local suits = {}
     for _, card in ipairs(player_hand) do
-        suits[card.suit] = true
+        if card_has_all_suits(card) then
+            -- Arcoiris sticker gives card all 4 suits
+            suits["Oros"] = true
+            suits["Copas"] = true
+            suits["Espadas"] = true
+            suits["Bastos"] = true
+        else
+            suits[card.suit] = true
+        end
     end
     results.has_all_suits = (suits["Oros"] and suits["Copas"] and suits["Espadas"] and suits["Bastos"])
     
@@ -355,33 +373,33 @@ function amarracos.apply_effects(breakdown, hand, owned_prizes, state)
                 end
             end
         elseif prize.id == "reliquia" then
-            -- Oros cards add value to pesetas
+            -- Oros cards add value to pesetas (including arcoiris sticker)
             for _, game_card in ipairs(hand) do
-                if game_card.suit == "Oros" then
+                if card_matches_suit(game_card, "Oros") then
                     local value = game_card.value > 10 and 10 or game_card.value
                     effects.pesetas_bonus = effects.pesetas_bonus + value
                 end
             end
         elseif prize.id == "posavasos" then
-            -- Copas cards add value to HP
+            -- Copas cards add value to HP (including arcoiris sticker)
             for _, game_card in ipairs(hand) do
-                if game_card.suit == "Copas" then
+                if card_matches_suit(game_card, "Copas") then
                     local value = game_card.value > 10 and 10 or game_card.value
                     effects.hp_bonus = effects.hp_bonus + value
                 end
             end
         elseif prize.id == "afilar" then
-            -- Espadas cards add value to damage
+            -- Espadas cards add value to damage (including arcoiris sticker)
             for _, game_card in ipairs(hand) do
-                if game_card.suit == "Espadas" then
+                if card_matches_suit(game_card, "Espadas") then
                     local value = game_card.value > 10 and 10 or game_card.value
                     effects.damage_bonus = effects.damage_bonus + value
                 end
             end
         elseif prize.id == "madera" then
-            -- Bastos cards add value to defense
+            -- Bastos cards add value to defense (including arcoiris sticker)
             for _, game_card in ipairs(hand) do
-                if game_card.suit == "Bastos" then
+                if card_matches_suit(game_card, "Bastos") then
                     local value = game_card.value > 10 and 10 or game_card.value
                     effects.defense_bonus = effects.defense_bonus + value
                 end

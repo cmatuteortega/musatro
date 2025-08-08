@@ -8,6 +8,7 @@ local shop = require("shop")
 local transition = require("transition")
 local animation = require("animation")
 local amarracos = require("amarracos")
+local stickers = require("stickers")
 local ui = require("ui")
 
 local game_state = {}
@@ -48,7 +49,7 @@ local state = {
     selected_shop_item = 1,
     in_card_selection = false,
     card_selection_cards = {},
-    selected_card_index = 1,
+    selected_card_index = 0,  -- Initialize with no selection for click-to-select
     card_selection_type = "",  -- "card_choice" or "booster"
     
     -- Shop and upgrade system
@@ -61,6 +62,15 @@ local state = {
     -- Amarracos (prizes) system
     owned_amarracos = {},  -- List of owned prizes
     shop_amarracos = {},   -- Current shop prizes available
+    
+    -- Stickers (pegatinas) system
+    owned_stickers = {},   -- List of owned stickers
+    shop_stickers = {},    -- Current shop stickers available
+    dragging_sticker = nil,  -- Currently dragged sticker data
+    drag_offset_x = 0,     -- Mouse offset from sticker center
+    drag_offset_y = 0,     -- Mouse offset from sticker center
+    sticker_registry = {}, -- Persistent sticker attachments by card identity
+    permanently_removed_cards = {}, -- Cards permanently removed from base deck
     
     -- Animation state
     waiting_for_draw_animation = false,
@@ -92,10 +102,17 @@ function game_state.init()
     -- Reset all progression on game restart
     state.purchased_cards = {}
     state.owned_amarracos = {}
+    state.owned_stickers = {}
+    state.sticker_registry = {}  -- Clear sticker attachments on game restart
+    state.permanently_removed_cards = {}  -- Clear permanent removals on game restart
+    state.dragging_sticker = nil
+    state.drag_offset_x = 0
+    state.drag_offset_y = 0
     state.upgrades = {}
     
-    -- Initialize player with fresh base deck
-    state.deck = card.create_deck()
+    -- Initialize player with fresh base deck (excluding permanently removed cards)
+    state.deck = game_state.create_filtered_deck()
+    game_state.restore_deck_stickers(state.deck)  -- Restore sticker attachments
     card.shuffle_deck(state.deck)
     state.hand = card.draw_cards(state.deck, 4)
     state.discards_remaining = 3
@@ -143,19 +160,20 @@ function game_state.init()
     state.win_animations = {}
     state.in_card_selection = false
     state.card_selection_cards = {}
-    state.selected_card_index = 1
+    state.selected_card_index = 0  -- Initialize with no selection for click-to-select
     state.card_selection_type = ""
-    state.owned_amarracos = {}
+    -- Don't reset owned_amarracos and owned_stickers - they should persist between rounds
     state.shop_amarracos = {}
+    state.shop_stickers = {}
+    state.dragging_sticker = nil
+    state.drag_offset_x = 0
+    state.drag_offset_y = 0
     card.clear_selections(state.hand)
     combat.reset()
     menu.hide()
     
-    -- Start with round transition
-    transition.start(transition.TYPE_ROUND_START, 
-                    "RONDA 1", 
-                    "¡Derrota al Rival!", 
-                    2.0, nil)
+    -- Start with MUS animation instead of transition
+    ui.start_mus_animation(1)
     
     -- Position cards in hand
     local canvas = require("canvas")
@@ -198,8 +216,8 @@ function game_state.update(dt)
             state.waiting_for_shop = false
             state.clearing_cards = false  -- Now it's safe to show UI again
             state.in_shop = true
-            state.shop_items = shop.generate_shop_items(state.owned_amarracos)
-            state.selected_shop_item = 1
+            state.shop_items = shop.generate_shop_items(state.owned_amarracos, state.owned_stickers)
+            state.selected_shop_item = 0  -- No item selected initially (click to select)
             -- Store generated amarracos for consistency (no longer needed as separate list)
             state.shop_amarracos = {}
         end
@@ -223,6 +241,10 @@ function game_state.update(dt)
             
             -- Draw new hands
             state.hand = card.draw_cards(state.deck, 4)
+            -- Restore stickers to newly drawn cards
+            for _, game_card in ipairs(state.hand) do
+                game_state.restore_sticker_attachments(game_card)
+            end
             -- Use different random seed for AI to ensure different draws
             math.randomseed(os.time() + math.random(1000, 9999))
             state.ai_hand = card.draw_cards(state.ai_deck, 4)
@@ -302,6 +324,8 @@ function game_state.update(dt)
                 function()
                     -- Animation complete, add cards to hand and finish
                     for _, new_card in ipairs(state.pending_draw_data.new_cards) do
+                        -- Restore stickers before adding to hand
+                        game_state.restore_sticker_attachments(new_card)
                         table.insert(state.hand, new_card)
                     end
                     
@@ -389,6 +413,7 @@ function game_state.update(dt)
             state.damage_sequence_active = false
             state.damage_sequence_timer = 0
             state.damage_sequence_combat_result = nil
+            
             
             if ai_was_defeated then
                 -- AI was defeated - round victory
@@ -526,13 +551,16 @@ function game_state.start_next_round()
     state.round_hands_used = 0
     state.show_ai_cards = false
     
-    -- Refill both decks completely
-    state.deck = card.create_deck()
+    -- Refill both decks completely (excluding permanently removed cards)
+    state.deck = game_state.create_filtered_deck()
     
     -- Add all purchased cards to player deck
     for _, purchased_card in ipairs(state.purchased_cards) do
         table.insert(state.deck, purchased_card)
     end
+    
+    -- Restore sticker attachments to all cards
+    game_state.restore_deck_stickers(state.deck)
     
     card.shuffle_deck(state.deck)
     
@@ -544,6 +572,10 @@ function game_state.start_next_round()
     
     -- Reset both players for new round
     state.hand = card.draw_cards(state.deck, 4)
+    -- Restore stickers to newly drawn cards
+    for _, game_card in ipairs(state.hand) do
+        game_state.restore_sticker_attachments(game_card)
+    end
     -- Ensure different random state for AI draw
     math.randomseed(os.time() + math.random(1000, 9999))
     state.ai_hand = card.draw_cards(state.ai_deck, 4)
@@ -568,11 +600,8 @@ function game_state.start_next_round()
     -- Apply amarracos round effects
     amarracos.apply_round_effects(state.owned_amarracos, state)
     
-    -- Start round transition
-    transition.start(transition.TYPE_ROUND_START, 
-                    string.format("RONDA %d", state.round), 
-                    string.format("El Rival tiene %d HP", state.ai_hp), 
-                    2.0, nil)
+    -- Start MUS animation instead of transition
+    ui.start_mus_animation(state.round)
 end
 
 -- Add card to player deck permanently
@@ -631,6 +660,10 @@ function game_state.discard_cards()
     
     -- Prepare new cards to draw
     local new_cards = card.draw_cards(state.deck, #discarded)
+    -- Restore stickers to newly drawn cards
+    for _, game_card in ipairs(new_cards) do
+        game_state.restore_sticker_attachments(game_card)
+    end
     
     -- AI discarding logic
     local ai_discarded_count = 0
@@ -834,6 +867,18 @@ function game_state.play_cards()
         table.insert(played_cards, state.hand[index])
     end
     
+    -- Check for corazon stickers and mark cards for permanent removal
+    for _, game_card in ipairs(played_cards) do
+        if game_card.attached_sticker then
+            local stickers = require("stickers")
+            local sticker = stickers.get_sticker_by_id(game_card.attached_sticker)
+            if sticker and sticker.effect_type == "permanent_removal" then
+                -- Mark this card for permanent removal from deck
+                game_card._marked_for_removal = true
+            end
+        end
+    end
+    
     -- AI selects cards to play
     local ai_played_cards = ai.select_cards(state.ai_hand)
     local ai_phrase = ai.get_playing_phrase()
@@ -851,6 +896,9 @@ function game_state.play_cards()
     state.in_combat = true
     state.show_ai_cards = true  -- Reveal AI cards immediately when combat starts
     state.last_hand_breakdown = combat_result.player_breakdown
+    
+    -- Process permanent removal of corazón sticker cards immediately after combat starts
+    game_state.process_permanent_card_removal()
     
     -- Fixed: combat_result now properly includes amarracos data
     
@@ -897,21 +945,7 @@ function game_state.select_card_by_position(x, y)
 end
 
 -- Handle shop navigation
-function game_state.navigate_shop(direction)
-    if not state.in_shop then
-        return false
-    end
-    
-    if direction == "up" and state.selected_shop_item > 1 then
-        state.selected_shop_item = state.selected_shop_item - 1
-        return true
-    elseif direction == "down" and state.selected_shop_item < #state.shop_items then
-        state.selected_shop_item = state.selected_shop_item + 1
-        return true
-    end
-    
-    return false
-end
+-- Navigate shop items (removed - now using click-to-select)
 
 -- Purchase shop item
 function game_state.purchase_shop_item()
@@ -937,6 +971,26 @@ function game_state.purchase_shop_item()
         
         -- Remove purchased amarraco from shop items
         table.remove(state.shop_items, state.selected_shop_item)
+        
+        -- Adjust selection if needed
+        if state.selected_shop_item > #state.shop_items then
+            state.selected_shop_item = #state.shop_items
+        end
+        
+        return true
+    elseif item.sticker_data then
+        -- Purchase sticker directly
+        local cost = item.sticker_data.cost
+        if state.pesetas < cost then
+            return false
+        end
+        
+        state.pesetas = state.pesetas - cost
+        table.insert(state.owned_stickers, item.sticker_data)
+        
+        -- Remove purchased sticker from shop items
+        table.remove(state.shop_items, state.selected_shop_item)
+        
         -- Adjust selection if needed
         if state.selected_shop_item > #state.shop_items then
             state.selected_shop_item = #state.shop_items
@@ -964,32 +1018,44 @@ function game_state.purchase_shop_item()
     if result == "card_choice" then
         -- Enter card selection mode for regular cards
         local choices = shop.get_card_choices()
+        state.in_shop = false  -- Temporarily exit shop for clean interface
         state.in_card_selection = true
         state.card_selection_cards = choices
-        state.selected_card_index = 1
+        state.selected_card_index = 0  -- No selection initially for click-to-select
         state.card_selection_type = "card_choice"
         return true
     elseif result == "liga_choice" then
         -- Enter card selection mode for Liga cards
         local liga_choices = shop.get_liga_choices()
+        state.in_shop = false  -- Temporarily exit shop for clean interface
         state.in_card_selection = true
         state.card_selection_cards = liga_choices
-        state.selected_card_index = 1
+        state.selected_card_index = 0  -- No selection initially for click-to-select
         state.card_selection_type = "liga_choice"
         return true
     elseif result == "pokemon_choice" then
         -- Enter card selection mode for Pokemon cards
         local pokemon_choices = shop.get_pokemon_choices()
+        state.in_shop = false  -- Temporarily exit shop for clean interface
         state.in_card_selection = true
         state.card_selection_cards = pokemon_choices
-        state.selected_card_index = 1
+        state.selected_card_index = 0  -- No selection initially for click-to-select
         state.card_selection_type = "pokemon_choice"
+        return true
+    elseif result == "sticker_choice" then
+        -- Enter card selection mode for stickers
+        local sticker_choices = shop.get_sticker_choices()
+        state.in_shop = false  -- Temporarily exit shop for clean interface
+        state.in_card_selection = true
+        state.card_selection_cards = sticker_choices
+        state.selected_card_index = 0  -- No selection initially for click-to-select
+        state.card_selection_type = "sticker_choice"
         return true
     elseif result == "booster" then
         -- This is no longer used but keeping for compatibility
         state.in_card_selection = true
         state.card_selection_cards = booster_cards
-        state.selected_card_index = 1
+        state.selected_card_index = 0  -- Initialize with no selection for click-to-select
         state.card_selection_type = "booster"
         return true
     else
@@ -1070,22 +1136,7 @@ function game_state.trigger_win_animations(player_breakdown, ai_breakdown, playe
     end
 end
 
--- Navigate card selection
-function game_state.navigate_card_selection(direction)
-    if not state.in_card_selection then
-        return false
-    end
-    
-    if direction == "left" and state.selected_card_index > 1 then
-        state.selected_card_index = state.selected_card_index - 1
-        return true
-    elseif direction == "right" and state.selected_card_index < #state.card_selection_cards then
-        state.selected_card_index = state.selected_card_index + 1
-        return true
-    end
-    
-    return false
-end
+-- Navigate card selection (removed - now using click-to-select for all types)
 
 -- Confirm card selection
 function game_state.confirm_card_selection()
@@ -1104,8 +1155,9 @@ function game_state.confirm_card_selection()
             -- Return to shop
             state.in_card_selection = false
             state.card_selection_cards = {}
-            state.selected_card_index = 1
+            state.selected_card_index = 0  -- Initialize with no selection for click-to-select
             state.card_selection_type = ""
+            state.in_shop = true  -- Return to shop interface
             
             -- Regenerate shop amarracos
             state.shop_amarracos = amarracos.get_shop_prizes(state.owned_amarracos)
@@ -1122,10 +1174,26 @@ function game_state.confirm_card_selection()
         -- Return to shop
         state.in_card_selection = false
         state.card_selection_cards = {}
-        state.selected_card_index = 1
+        state.selected_card_index = 0  -- Initialize with no selection for click-to-select
         state.card_selection_type = ""
+        state.in_shop = true  -- Return to shop interface
         
         -- Card added to deck
+        
+        return true
+    elseif state.card_selection_type == "sticker_choice" then
+        -- Handle sticker selection
+        local selected_sticker = selected_item
+        table.insert(state.owned_stickers, selected_sticker)
+        
+        -- Return to shop
+        state.in_card_selection = false
+        state.card_selection_cards = {}
+        state.selected_card_index = 0  -- Initialize with no selection for click-to-select
+        state.card_selection_type = ""
+        state.in_shop = true  -- Return to shop interface
+        
+        -- Sticker added to inventory
         
         return true
     end
@@ -1139,8 +1207,28 @@ function game_state.cancel_card_selection()
     
     state.in_card_selection = false
     state.card_selection_cards = {}
-    state.selected_card_index = 1
+    state.selected_card_index = 0  -- Initialize with no selection for click-to-select
     state.card_selection_type = ""
+    state.in_shop = true  -- Return to shop interface
+    
+    return true
+end
+
+-- Reroll shop options (costs 1 peseta)
+function game_state.reroll_shop()
+    if not state.in_shop or state.pesetas < 1 then
+        return false
+    end
+    
+    -- Cost 1 peseta to reroll
+    state.pesetas = state.pesetas - 1
+    
+    -- Regenerate shop items
+    local shop = require("shop")
+    state.shop_items = shop.generate_shop_items(state.owned_amarracos, state.owned_stickers)
+    
+    -- Reset selection
+    state.selected_shop_item = 0
     
     return true
 end
@@ -1189,6 +1277,123 @@ function game_state.select_all_cards()
     end
     
     -- All cards selection toggled
+end
+
+-- Sticker persistence functions
+-- Generate unique key for a card to track sticker attachments
+local function get_card_key(game_card)
+    if game_card.card_type == "liga" then
+        return string.format("liga_%d_%s", game_card.value, game_card.team or "unknown")
+    elseif game_card.card_type == "pokemon" then
+        return string.format("pokemon_%d_%s", game_card.value, game_card.pokemon or "unknown")
+    else
+        return string.format("regular_%d_%s", game_card.value, game_card.suit)
+    end
+end
+
+-- Register a sticker attachment
+function game_state.register_sticker_attachment(game_card, sticker_id)
+    local key = get_card_key(game_card)
+    state.sticker_registry[key] = sticker_id
+end
+
+-- Remove a sticker attachment from registry
+function game_state.unregister_sticker_attachment(game_card)
+    local key = get_card_key(game_card)
+    state.sticker_registry[key] = nil
+end
+
+-- Restore sticker attachments to a card based on registry
+function game_state.restore_sticker_attachments(game_card)
+    local key = get_card_key(game_card)
+    local sticker_id = state.sticker_registry[key]
+    if sticker_id then
+        game_card.attached_sticker = sticker_id
+    end
+end
+
+-- Apply sticker attachments to all cards in a deck
+function game_state.restore_deck_stickers(deck)
+    for _, game_card in ipairs(deck) do
+        game_state.restore_sticker_attachments(game_card)
+    end
+end
+
+-- Create deck with permanent exclusions applied
+function game_state.create_filtered_deck()
+    local full_deck = card.create_deck()
+    local filtered_deck = {}
+    
+    -- Only include cards that haven't been permanently removed
+    for _, game_card in ipairs(full_deck) do
+        local card_key = get_card_key(game_card)
+        if not state.permanently_removed_cards[card_key] then
+            table.insert(filtered_deck, game_card)
+        end
+    end
+    
+    return filtered_deck
+end
+
+-- Process permanent removal of cards with corazon stickers after combat
+function game_state.process_permanent_card_removal()
+    -- Check played cards for removal markers
+    local cards_to_remove = {}
+    
+    -- Check player played cards
+    if state.player_played_cards then
+        for _, game_card in ipairs(state.player_played_cards) do
+            if game_card._marked_for_removal then
+                table.insert(cards_to_remove, game_card)
+            end
+        end
+    end
+    
+    -- Remove marked cards from the deck permanently
+    for _, card_to_remove in ipairs(cards_to_remove) do
+        game_state.remove_card_from_deck_permanently(card_to_remove)
+    end
+    
+    -- Clear the removal markers
+    if state.player_played_cards then
+        for _, game_card in ipairs(state.player_played_cards) do
+            game_card._marked_for_removal = nil
+        end
+    end
+end
+
+-- Remove a specific card from the deck permanently (including purchased cards)
+function game_state.remove_card_from_deck_permanently(card_to_remove)
+    local card_key = get_card_key(card_to_remove)
+    
+    -- Add to permanently removed cards list (prevents recreation in future rounds)
+    state.permanently_removed_cards[card_key] = true
+    
+    -- Remove from current deck
+    for i = #state.deck, 1, -1 do
+        local deck_card = state.deck[i]
+        if get_card_key(deck_card) == card_key then
+            table.remove(state.deck, i)
+            break  -- Only remove one instance
+        end
+    end
+    
+    -- Remove from purchased cards (so it won't be added back in future rounds)
+    for i = #state.purchased_cards, 1, -1 do
+        local purchased_card = state.purchased_cards[i]
+        if get_card_key(purchased_card) == card_key then
+            table.remove(state.purchased_cards, i)
+            break  -- Only remove one instance
+        end
+    end
+    
+    -- Also remove the sticker attachment from registry since card is gone
+    game_state.unregister_sticker_attachment(card_to_remove)
+end
+
+-- Get permanently removed cards (for debug display)
+function game_state.get_permanently_removed_cards()
+    return state.permanently_removed_cards
 end
 
 return game_state
